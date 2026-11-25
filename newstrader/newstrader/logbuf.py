@@ -71,10 +71,15 @@ class RingHandler(logging.Handler):
 _LINE = re.compile(r"^(\d\d)\.(\d\d)\. (\d\d):(\d\d):(\d\d) (DEBUG|INFO|WARNING|ERROR|CRITICAL)\s+(?:\[([\w.]+)\] )?(.*)$")
 
 
-def prefill(path: Path, max_bytes: int = 400_000, now: float | None = None) -> int:
-    """Letzte Zeilen aus der Logdatei übernehmen (Format: „25.11. 12:22:17 INFO    [newstrader.x] Text“)."""
-    if not path.exists():
+_prefilled = [False]
+
+
+def prefill(path: Path, max_bytes: int = 400_000, now: float | None = None, force: bool = False) -> int:
+    """Letzte Zeilen aus der Logdatei übernehmen (Format: „25.11. 12:22:17 INFO    [newstrader.x] Text“).
+    Nur einmal pro Prozess – sonst stünden die alten Zeilen doppelt da (die Einrichtung läuft beim Add-on zweimal)."""
+    if (_prefilled[0] and not force) or not path.exists():
         return 0
+    _prefilled[0] = True
     with path.open("rb") as f:
         f.seek(0, 2)
         f.seek(max(0, f.tell() - max_bytes))
