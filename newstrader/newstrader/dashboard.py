@@ -39,20 +39,16 @@ def _trades(limit: int = 300) -> list[dict]:
     return rows[-limit:][::-1]  # neueste zuerst
 
 
-def _log_tail(lines: int = 80) -> list[str]:
-    path = STATE_DIR / "bot.log"
-    if not path.exists():
-        return []
-    with path.open("rb") as f:
-        f.seek(0, os.SEEK_END)
-        f.seek(max(0, f.tell() - 40_000))
-        text = f.read().decode("utf-8", errors="replace")
-    return text.splitlines()[-lines:]
+def _version() -> str:
+    try:
+        return (Path(__file__).parent / "VERSION").read_text().strip()
+    except OSError:
+        return "lokal"
 
 
 def build_state(cfg: Config, in_process: bool) -> dict:
     from .bot import running_pid
-    from . import learning
+    from . import learning, logbuf
     zc = learning.zocker_cfg(cfg)  # Zocker: eigenes Profil + Gelerntes
     pf = _read_json(STATE_DIR / "portfolio.json", None)
     cycle = _read_json(STATE_DIR / "last_cycle.json", {"symbols": {}})
@@ -115,7 +111,6 @@ def build_state(cfg: Config, in_process: bool) -> dict:
         "symbols": [{"symbol": s, "name": cfg.names.get(s, s), "held": pf is not None and s in pf["positions"], **v}
                     for s, v in symbols.items()],
         "trades": _trades(),
-        "log": _log_tail(),
         "rules": {"buy": cfg.buy_threshold, "sell": cfg.sell_threshold, "stop_loss": zc.stop_loss_pct,
                   "trailing": zc.trailing_stop_pct, "max_position": zc.max_position_pct,
                   "mode": cfg.trading_mode, "short": zc.short_threshold, "cover": zc.cover_threshold,
@@ -123,7 +118,7 @@ def build_state(cfg: Config, in_process: bool) -> dict:
                   "max_lev_stocks": zc.max_leverage_stocks, "max_lev_crypto": zc.max_leverage_crypto,
                   "closeout": zc.margin_closeout_pct, "max_gross": zc.max_gross_exposure,
                   "zocker_buy": zc.buy_threshold, "profile": cfg.zocker_profile},
-        "learning": learning.learner().summary(cfg.zocker()),
+        "version": _version(), "log_errors": logbuf.error_times(), "learning": learning.learner().summary(cfg.zocker()),
     }
 
 
@@ -422,6 +417,25 @@ def make_handler(cfg: Config, in_process: bool):
                 self._send((STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
             elif page == "/mine.js":
                 self._send((STATIC / "mine.js").read_bytes(), "text/javascript; charset=utf-8")
+            elif page == "/api/logs":
+                from . import logbuf
+                q = parse_qs(urlparse(self.path).query)
+                after = int((q.get("after") or ["0"])[0] or 0)
+                if after > logbuf.last_seq():   # Server wurde neu gestartet – alles neu schicken
+                    after = 0
+                self._json({"entries": logbuf.entries(after, 2000 if after == 0 else 500), "last": logbuf.last_seq(),
+                            "areas": logbuf.AREAS, "reset": after == 0})
+            elif page == "/api/logs/download":
+                body = b""
+                for f in (STATE_DIR / "bot.log.1", STATE_DIR / "bot.log"):
+                    if f.exists():
+                        body += f.read_bytes()[-3_000_000:]
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Disposition", f'attachment; filename="newstrader-log-{datetime.now():%Y-%m-%d-%H%M}.txt"')
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
             elif page == "/api/health":  # für den Watchdog von Home Assistant
                 from .bot import healthy, HEARTBEAT
                 ok = not in_process or healthy()

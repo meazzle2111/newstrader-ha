@@ -357,6 +357,7 @@ button.busy { opacity: .75; cursor: progress; }
 .zmeta { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--ink-2); margin-top: 6px; font-variant-numeric: tabular-nums; }
 .zmeta b { color: var(--ink); font-weight: 600; }
 .zprod { font-size: 12.5px; margin-top: 4px; }
+.ztr { max-width: none; margin-top: 5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .zprod a { color: var(--ink); }
 @media (max-width: 420px) { .subnav { gap: 3px; } .subnav button { padding: 7px 9px; font-size: 13px; } }
 @media (max-width: 600px) { .todo-list { grid-template-columns: 1fr; } .value-foot { flex-direction: column; align-items: stretch; } .value-foot .check { justify-content: space-between; } }
@@ -367,6 +368,56 @@ button.busy { opacity: .75; cursor: progress; }
   .risk-tiles { grid-template-columns: repeat(2, 1fr); }
   .txform { grid-template-columns: 1fr 1fr; }
   .txform input.w-sym, .txform input.w-num, .txform input.w-date, .txform input.w-isin { width: 100%; }
+}
+
+
+/* ---------- Hauptmenü, Einstellungen, Log ---------- */
+.tabs { overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { white-space: nowrap; }
+.tab-badge { display: inline-block; min-width: 17px; padding: 0 5px; margin-left: 6px; border-radius: 999px; font-size: 11px; line-height: 17px;
+  background: var(--bad-text); color: #fff; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums; }
+.set-h { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 22px 2px 8px; }
+.set-h:first-child { margin-top: 2px; }
+.btn.sm { padding: 5px 11px; font-size: 12.5px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+.sys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 22px; padding: 12px 16px 16px; }
+.sys-kv { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.sys-kv b { font-weight: 600; font-size: 13.5px; color: var(--ink); }
+.set-h:has(+ #mvBroker:empty + #mvStrategy:empty + #mvSpecSet:empty + #mvAlerts:empty) { display: none; }
+.log-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 12px 16px 0; }
+.log-head input { font: inherit; font-size: 13px; padding: 5px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface);
+  color: var(--ink); flex: 1 1 150px; max-width: 280px; min-width: 0; }
+.log-areas { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 16px 0; }
+.chip { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: transparent;
+  color: var(--ink-2); cursor: pointer; }
+.chip.on { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.chip .n { opacity: .6; margin-left: 5px; font-variant-numeric: tabular-nums; }
+.log-status { font-size: 12px; color: var(--muted); padding: 8px 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.log-status .live { width: 7px; height: 7px; border-radius: 50%; background: var(--good); display: inline-block; }
+.log-status .live.off { background: var(--muted); }
+.log-list { border-top: 1px solid var(--border); }
+.log-day { position: sticky; top: 0; z-index: 2; background: var(--surface-2); font-size: 11.5px; font-weight: 600; color: var(--ink-2);
+  padding: 5px 16px; border-bottom: 1px solid var(--border); }
+.lrow { display: grid; grid-template-columns: 58px 86px 104px minmax(0, 1fr); gap: 0 10px; padding: 6px 16px; border-bottom: 1px solid var(--border);
+  font-size: 12.5px; align-items: baseline; }
+.lrow time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+.lrow.w { background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.lrow.e { background: color-mix(in srgb, var(--neg) 8%, transparent); }
+.lv { font-size: 11px; font-weight: 600; justify-self: start; padding: 1px 7px; border-radius: 999px; color: var(--muted); font-weight: 500; padding-left: 0; }
+.lrow.w .lv { color: var(--ink); background: color-mix(in srgb, var(--warn) 30%, transparent); padding-left: 7px; font-weight: 600; }
+.lrow.e .lv { color: var(--bad-text); background: color-mix(in srgb, var(--neg) 16%, transparent); padding-left: 7px; font-weight: 600; }
+.lar { font-size: 12px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lm { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+.lm details summary { cursor: pointer; list-style: none; }
+.lm details summary::-webkit-details-marker { display: none; }
+.lm details summary .more { color: var(--muted); font-family: system-ui, sans-serif; font-size: 11.5px; margin-left: 6px; }
+.lm details[open] summary .more { display: none; }
+.lm mark { background: color-mix(in srgb, var(--warn) 45%, transparent); color: inherit; border-radius: 2px; }
+.log-more { display: flex; justify-content: center; padding: 12px; }
+@media (max-width: 640px) {
+  .lrow { grid-template-columns: auto auto minmax(0, 1fr); gap: 2px 8px; }
+  .lrow .lm { grid-column: 1 / -1; }
+  .log-head .spacer { display: none; }
 }
 
 @media (max-width: 980px) { .mine-grid { grid-template-columns: 1fr; } }
@@ -392,6 +443,8 @@ button.busy { opacity: .75; cursor: progress; }
   <nav class="tabs" id="tabs">
     <button data-tab="pm" class="on">Portfolio</button>
     <button data-tab="bot">Zocker</button>
+    <button data-tab="log">Log<span class="tab-badge hidden" id="logBadge"></span></button>
+    <button data-tab="set">Einstellungen</button>
   </nav>
 
   <div id="tabPm">
@@ -399,6 +452,8 @@ button.busy { opacity: .75; cursor: progress; }
   </div>
 
   <div id="tabBot" class="hidden">
+  <nav class="subnav" id="zSub"><button data-zsub="overview" class="on">Übersicht</button><button data-zsub="markt">Kurse &amp; Signale</button><button data-zsub="trades">Trades &amp; Lernen</button></nav>
+  <div id="zS-overview">
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
     <span class="pill" id="modePill">Modus: …</span>
     <span class="pill hidden" id="analystPill">Analyse: …</span>
@@ -406,7 +461,6 @@ button.busy { opacity: .75; cursor: progress; }
   <div id="banner"></div>
 
   <section class="grid kpis" id="kpis"></section>
-  <section class="card" id="learnCard" style="margin-bottom:14px"></section>
 
   <section class="grid two">
     <div class="card">
@@ -421,7 +475,9 @@ button.busy { opacity: .75; cursor: progress; }
       <div class="tbl" id="positions"></div>
     </div>
   </section>
+  </div>
 
+  <div id="zS-markt" class="hidden">
 
   <section class="card" id="pcCard" style="margin-bottom:14px">
     <div class="pc-head">
@@ -449,15 +505,43 @@ button.busy { opacity: .75; cursor: progress; }
     <div class="rules" id="rules"></div>
   </section>
 
-  <section class="card mt">
+  </div>
+
+  <div id="zS-trades" class="hidden">
+  <section class="card" id="learnCard" style="margin-bottom:14px"></section>
+  <section class="card">
     <h2>Trades</h2>
     <div class="tbl" id="trades"></div>
   </section>
+  </div>
+  </div>
 
-  <details class="card mt" id="logBox">
-    <summary>Log</summary>
-    <div class="log" id="log"></div>
-  </details>
+  <div id="tabLog" class="hidden">
+    <section class="card logcard">
+      <div class="log-head">
+        <div class="seg" id="logLvl"><button data-l="all" class="on">Alle</button><button data-l="WARNING">Warnungen</button><button data-l="ERROR">Fehler</button></div>
+        <input type="search" id="logQ" placeholder="Suchen …" aria-label="Log durchsuchen">
+        <div class="spacer"></div>
+        <button class="btn ghost sm" id="logPause">⏸ Anhalten</button>
+        <button class="btn ghost sm" id="logCopy" title="Gefilterte Einträge als Text kopieren">Kopieren</button>
+        <a class="btn ghost sm" id="logDl" href="api/logs/download" download>Datei ↓</a>
+      </div>
+      <div class="log-areas" id="logAreas"></div>
+      <div class="log-status" id="logStatus"></div>
+      <div class="log-list" id="logList"><div class="empty">Lade …</div></div>
+    </section>
+  </div>
+
+  <div id="tabSet" class="hidden">
+    <h3 class="set-h">Portfolio</h3>
+    <div id="mvBroker"></div>
+    <div id="mvStrategy"></div>
+    <div id="mvSpecSet"></div>
+    <div id="mvAlerts"></div>
+    <h3 class="set-h">Zocker</h3>
+    <section class="card" id="zSettings" style="margin-bottom:14px"></section>
+    <h3 class="set-h">System</h3>
+    <section class="card" id="sysCard" style="margin-bottom:14px"></section>
   </div>
 
   <div id="tabMine" class="hidden">
@@ -568,7 +652,9 @@ function render(s) {
   renderSignals(s);
   renderTrades(s);
   pcInitControls(s);
-  $("log").textContent = s.log.join("\n");
+  renderZockerSettings(s);
+  renderSystem(s);
+  renderLogBadge(s);
 }
 
 document.addEventListener("click", async (e) => {
@@ -585,15 +671,9 @@ function renderLearning(s) {
   if (!L) { $("learnCard").innerHTML = ""; return; }
   const recent = (L.recent || []).slice(0, 6).map((r) => `<div class="cmp-row"><div><b>${esc(r.symbol)}</b> ${r.side === "short" ? "Short" : "Long"} ${r.lev}x
       <div class="name">${esc(r.reason)}</div></div><div class="${r.ret > 0 ? "up" : "down"}" style="white-space:nowrap">${r.ret > 0 ? "+" : ""}${nf(0).format(r.ret * 100)} % · ${r.pnl > 0 ? "+" : ""}${nf(2).format(r.pnl)} €</div></div>`).join("");
-  const prof = s.rules.profile || "maximal";
-  $("learnCard").innerHTML = `<h2>Zocker-Profil &amp; Lernmodus</h2>
-    <div style="padding:0 16px 16px">
-      <div class="seg" style="margin-bottom:6px">
-        <button data-zprof="maximal" class="${prof === "maximal" ? "on" : ""}">Ruhig</button>
-        <button data-zprof="action" class="${prof === "action" ? "on" : ""}">Action</button></div>
-      <div class="name" style="padding-bottom:10px;line-height:1.5">${prof === "action"
-        ? "Action: sichert Gewinne – ab +4 % Kursplus wird der Stop eng auf 3 % nachgezogen. Viele Trades (Backtest: 227, +11 %)."
-        : "Ruhig: lässt Gewinner laufen (Trailing-Stop 20 %), wenige Trades – im Backtest das beste Ergebnis (62 Trades, +84 %)."}</div>
+  $("learnCard").innerHTML = `<h2>Lernmodus</h2>
+    <div class="hint">Was der Zocker aus seinen geschlossenen Trades gelernt hat. Profil umstellen: Einstellungen → Zocker.</div>
+    <div style="padding:10px 16px 16px">
       <div class="rules" style="padding:0 0 8px"><span>${L.n} Trades ausgewertet</span><span>Trefferquote ${nf(0).format(L.winrate * 100)} %</span>
         <span>Margin-Calls ${nf(0).format(L.liq * 100)} %</span><span>Hebel max. ${nf(0).format(L.max_leverage)}x</span>
         <span>Long ab ${L.buy_threshold >= 0 ? "+" : ""}${nf(2).format(L.buy_threshold)} · Short ab ${nf(2).format(L.short_threshold)}</span></div>
@@ -855,30 +935,22 @@ function renderSignals(s) {
 // ---------- Trades ----------
 function renderTrades(s) {
   if (!s.trades.length) { $("trades").innerHTML = `<div class="empty">Noch keine Trades.</div>`; return; }
-  $("trades").innerHTML = `<table>
-    <tr><th>Zeit</th><th>Art</th><th>Wert</th><th class="num">Stück</th><th class="num">Kurs</th><th class="num">Gebühr</th><th class="num">G/V</th><th>Begründung</th></tr>
-    ${s.trades.map((t) => {
-      const pnl = parseFloat(t.pnl);
-      const opening = t.action ? t.action === "OPEN" : t.side === "BUY";
-      const side = t.action ? t.side : "long";
-      const levTxt = t.leverage && +t.leverage > 1 ? ` ${t.leverage}x` : "";
-      const label = side === "short"
-        ? (opening ? `<span class="tag short">Short${levTxt}</span> eröffnet` : `<span class="tag short">Short${levTxt}</span> eingedeckt`)
-        : (opening ? `<span class="tag long">Long${levTxt}</span> eröffnet` : `<span class="tag long">Long${levTxt}</span> geschlossen`);
-      const buy = opening;
-      return `<tr class="pick" data-sym="${esc(t.symbol)}" title="Im Kurs-Chart anzeigen">
-        <td style="white-space:nowrap">${dt(t.time)}</td>
-        <td style="white-space:nowrap">${label}</td>
-        <td class="sym">${esc(t.symbol)}</td>
-        <td class="num">${nf(4).format(+t.qty)}</td>
-        <td class="num">${nf(2).format(+t.price)}</td>
-        <td class="num">${nf(2).format(+t.fee)}</td>
-        <td class="num ${buy ? "" : cls(pnl)}">${buy ? "–" : signed(pnl) + " " + CUR}</td>
-        <td><div class="reason">${esc(t.reason)}</div></td>
-      </tr>`;
-    }).join("")}
-  </table>`;
-  $("trades").querySelectorAll("tr.pick").forEach((tr) => tr.onclick = () => pcSelect(tr.dataset.sym, true));
+  $("trades").innerHTML = `<div class="zpos-list">${s.trades.map((t) => {
+    const pnl = parseFloat(t.pnl);
+    const opening = t.action ? t.action === "OPEN" : t.side === "BUY";
+    const side = t.action ? t.side : "long";
+    const levTxt = t.leverage && +t.leverage > 1 ? ` ${t.leverage}x` : "";
+    const verb = opening ? "eröffnet" : side === "short" ? "eingedeckt" : "geschlossen";
+    return `<div class="zpos pick" data-sym="${esc(t.symbol)}" title="Im Kurs-Chart anzeigen">
+      <div class="zrow"><div><span class="tag ${side === "short" ? "short" : "long"}">${side === "short" ? "Short" : "Long"}${levTxt}</span>
+        ${verb} · <b>${esc(t.symbol)}</b></div>
+        <div class="zr ${opening ? "name" : cls(pnl)}">${opening ? "" : `<b>${signed(pnl)} ${CUR}</b>`}</div></div>
+      <div class="zmeta"><span>${dt(t.time)}</span><span>${nf(4).format(+t.qty)} Stk. zu <b>${nf(2).format(+t.price)}</b></span>
+        <span>Gebühr ${nf(2).format(+t.fee)}</span></div>
+      ${t.reason ? `<div class="reason ztr">${esc(t.reason)}</div>` : ""}
+    </div>`;
+  }).join("")}</div>`;
+  $("trades").querySelectorAll(".pick").forEach((el) => el.onclick = () => pcSelect(el.dataset.sym, true));
 }
 
 
@@ -912,7 +984,10 @@ function pcSelect(sym, scroll) {
   PC.symbol = sym;
   pcInitControls(STATE);
   pcLoad();
-  if (scroll) $("pcCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  if (scroll) {   // Chart liegt unter „Kurse & Signale“
+    if (ZSUB !== "markt") showZSub("markt", true);
+    $("pcCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 async function pcLoad() {
@@ -1209,16 +1284,209 @@ $("sigMode").querySelectorAll("button").forEach((b) => b.onclick = () => {
 });
 $("sigSearch").addEventListener("input", () => STATE && renderSignals(STATE));
 
+
+// ---------- Einstellungen: Zocker + System ----------
+function renderZockerSettings(s) {
+  const prof = s.rules.profile || "maximal";
+  const lev = s.rules.mode === "leverage";
+  $("zSettings").innerHTML = `<h2>Zocker-Profil</h2>
+    <div class="hint">Gilt ab dem nächsten Durchlauf. Der Zocker handelt nur auf dem Papier – echte Knock-out-Scheine, aber kein echtes Geld.</div>
+    <div style="padding:12px 16px 16px">
+      <div class="seg" style="margin-bottom:8px">
+        <button data-zprof="maximal" class="${prof === "maximal" ? "on" : ""}">Ruhig</button>
+        <button data-zprof="action" class="${prof === "action" ? "on" : ""}">Action</button></div>
+      <div class="name" style="line-height:1.5">${prof === "action"
+        ? "Action: sichert Gewinne – ab +4 % Kursplus wird der Stop eng auf 3 % nachgezogen. Viele Trades (Backtest: 227, +11 %)."
+        : "Ruhig: lässt Gewinner laufen (Trailing-Stop 20 %), wenige Trades – im Backtest das beste Ergebnis (62 Trades, +84 %)."}</div>
+      <div class="rules" style="padding:10px 0 0">
+        <span>${lev ? `Hebel · Long${s.rules.shorts ? " & Short" : ""}` : "Depot ohne Hebel"}</span>
+        ${lev ? `<span>max. ${nf(0).format(s.rules.max_lev_stocks)}x Aktien / ${nf(0).format(s.rules.max_lev_crypto)}x Krypto</span>` : ""}
+        <span>Startkapital ${money(s.summary?.start_capital, 0)}</span></div>
+    </div>`;
+}
+
+function renderSystem(s) {
+  const last = s.cycle.time;
+  const kv = (k, v) => `<div class="sys-kv">${k}<b>${v}</b></div>`;
+  $("sysCard").innerHTML = `<div class="sys-grid">
+      ${kv("Version", esc(s.version || "–"))}
+      ${kv("Bot", s.bot.running ? `läuft · letzter Durchlauf ${last ? ago(last) : "–"}` : "gestoppt")}
+      ${kv("KI", esc(s.cycle.ai_providers || "–"))}
+      ${kv("Durchlauf", `alle ${nf(0).format(s.bot.loop_minutes)} Min.`)}
+      ${kv("Fehler (24 Std.)", `${(s.log_errors || []).length} · <a href="#log" data-goto-log="1">Log ansehen</a>`)}
+      ${kv("Darstellung", `<button class="btn ghost sm" type="button" onclick="document.getElementById('themeBtn').click()">Hell / Dunkel</button>`)}
+    </div>`;
+}
+document.addEventListener("click", (e) => { if (e.target.closest("[data-goto-log]")) { e.preventDefault(); showTab("log"); } });
+
+// ---------- Log ----------
+const LV = { DEBUG: ["Debug", "i"], INFO: ["Info", "i"], WARNING: ["⚠ Warnung", "w"], ERROR: ["✕ Fehler", "e"], CRITICAL: ["✕ Kritisch", "e"] };
+const LOG = { entries: [], last: 0, areas: {}, lvl: "all", off: new Set(), q: "", paused: false, pending: 0, busy: false, show: 400, at: 0 };
+try { const o = JSON.parse(localStorage.getItem("nt-log") || "{}"); LOG.lvl = o.lvl || "all"; LOG.off = new Set(o.off || []); } catch (e) {}
+const saveLogPrefs = () => { try { localStorage.setItem("nt-log", JSON.stringify({ lvl: LOG.lvl, off: [...LOG.off] })); } catch (e) {} };
+const logVisible = () => !document.hidden && !$("tabLog").classList.contains("hidden");
+
+async function loadLog() {
+  if (LOG.busy) return;
+  LOG.busy = true;
+  try {
+    const d = await (await fetch(`api/logs?after=${LOG.last}`, { cache: "no-store" })).json();
+    if (d.reset) LOG.entries = [];
+    LOG.entries.push(...d.entries);
+    if (LOG.entries.length > 3000) LOG.entries.splice(0, LOG.entries.length - 3000);
+    LOG.last = d.last; LOG.areas = d.areas || LOG.areas; LOG.at = Date.now();
+    if (LOG.paused) LOG.pending += d.entries.length;
+    if (!LOG.paused || d.reset || !$("logList").dataset.done) renderLog();
+    else renderLogStatus();
+    markLogSeen();
+  } catch (e) {
+    $("logStatus").innerHTML = `<span class="live off"></span> Keine Verbindung zum NewsTrader`;
+  } finally { LOG.busy = false; }
+}
+
+function logMatches(e, lvlOnly) {
+  if (LOG.lvl === "WARNING" && !["WARNING", "ERROR", "CRITICAL"].includes(e.lvl)) return false;
+  if (LOG.lvl === "ERROR" && !["ERROR", "CRITICAL"].includes(e.lvl)) return false;
+  if (lvlOnly) return true;
+  if (LOG.off.has(e.area)) return false;
+  return !LOG.q || e.msg.toLowerCase().includes(LOG.q);
+}
+
+function hl(text) {
+  const t = esc(text);
+  if (!LOG.q) return t;
+  const q = esc(LOG.q).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return t.replace(new RegExp(q, "gi"), (m) => `<mark>${m}</mark>`);
+}
+
+function dayLabel(d) {
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+  const diff = Math.round((t0 - new Date(d).setHours(0, 0, 0, 0)) / 86400000);
+  if (diff === 0) return "Heute";
+  if (diff === 1) return "Gestern";
+  return d.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
+}
+
+function renderLog() {
+  LOG.pending = 0;
+  // Zähler je Stufe (über alle Bereiche) und je Bereich (bei gewählter Stufe)
+  const n = { all: LOG.entries.length, WARNING: 0, ERROR: 0 };
+  const perArea = {};
+  for (const e of LOG.entries) {
+    if (e.lvl === "WARNING") n.WARNING++;
+    if (e.lvl === "ERROR" || e.lvl === "CRITICAL") { n.ERROR++; n.WARNING++; }
+    if (logMatches(e, true)) perArea[e.area] = (perArea[e.area] || 0) + 1;
+  }
+  $("logLvl").querySelectorAll("button").forEach((b) => {
+    const l = b.dataset.l;
+    b.classList.toggle("on", l === LOG.lvl);
+    b.innerHTML = `${{ all: "Alle", WARNING: "Warnungen", ERROR: "Fehler" }[l]} <span class="name">${nf(0).format(n[l])}</span>`;
+  });
+  $("logAreas").innerHTML = Object.entries(LOG.areas).map(([k, v]) =>
+    `<button class="chip ${LOG.off.has(k) ? "" : "on"}" data-area="${k}" aria-pressed="${!LOG.off.has(k)}">${esc(v)}<span class="n">${nf(0).format(perArea[k] || 0)}</span></button>`).join("");
+
+  const rows = [];
+  let shown = 0, total = 0, day = "";
+  for (let i = LOG.entries.length - 1; i >= 0; i--) {
+    const e = LOG.entries[i];
+    if (!logMatches(e)) continue;
+    total++;
+    if (shown >= LOG.show) continue;
+    shown++;
+    const d = new Date(e.ts * 1000);
+    const dl = dayLabel(d);
+    if (dl !== day) { day = dl; rows.push(`<div class="log-day">${dl}</div>`); }
+    const [lvTxt, lvCls] = LV[e.lvl] || [e.lvl, "i"];
+    const lines = e.msg.split("\n");
+    const body = lines.length > 3
+      ? `<details><summary>${hl(lines[0])}<span class="more">+ ${lines.length - 1} Zeilen</span></summary>${hl(lines.slice(1).join("\n"))}</details>`
+      : hl(e.msg);
+    rows.push(`<div class="lrow ${lvCls}"><time title="${d.toLocaleString("de-DE")}">${d.toLocaleTimeString("de-DE")}</time>
+      <span class="lv">${lvTxt}</span><span class="lar">${esc(LOG.areas[e.area] || e.area)}</span><div class="lm">${body}</div></div>`);
+  }
+  const list = $("logList");
+  const openIdx = [...list.querySelectorAll("details")].map((x, i) => x.open ? i : -1).filter((i) => i >= 0);
+  list.innerHTML = rows.length ? rows.join("") + (total > shown ? `<div class="log-more"><button class="btn ghost sm" id="logMore">Ältere anzeigen (${nf(0).format(total - shown)} weitere)</button></div>` : "")
+    : `<div class="empty">${LOG.entries.length ? "Keine Einträge für diesen Filter." : "Noch keine Einträge."}</div>`;
+  if (!LOG.pending) list.querySelectorAll("details").forEach((x, i) => { if (openIdx.includes(i)) x.open = true; });
+  list.dataset.done = "1";
+  if ($("logMore")) $("logMore").onclick = () => { LOG.show += 400; renderLog(); };
+  LOG.shownTotal = total;
+  renderLogStatus();
+}
+
+function renderLogStatus() {
+  const live = !LOG.paused;
+  $("logPause").textContent = live ? "⏸ Anhalten" : "▶ Weiter";
+  $("logStatus").innerHTML = `<span class="live ${live ? "" : "off"}"></span>
+    ${live ? "Live – aktualisiert alle 4 Sekunden" : `Angehalten${LOG.pending ? ` · ${nf(0).format(LOG.pending)} neue Einträge` : ""}`}
+    · ${nf(0).format(LOG.shownTotal || 0)} von ${nf(0).format(LOG.entries.length)} Einträgen`;
+}
+
+$("logLvl").querySelectorAll("button").forEach((b) => b.onclick = () => { LOG.lvl = b.dataset.l; LOG.show = 400; saveLogPrefs(); renderLog(); });
+$("logAreas").addEventListener("click", (e) => {
+  const c = e.target.closest("[data-area]");
+  if (!c) return;
+  const k = c.dataset.area, all = Object.keys(LOG.areas);
+  // Erster Klick bei „alle an“: nur diesen Bereich zeigen; sonst ein-/ausschalten
+  if (!LOG.off.size) all.forEach((x) => x !== k && LOG.off.add(x));
+  else if (LOG.off.has(k)) LOG.off.delete(k);
+  else LOG.off.add(k);
+  if (LOG.off.size >= all.length) LOG.off.clear();
+  LOG.show = 400; saveLogPrefs(); renderLog();
+});
+let logQT;
+$("logQ").addEventListener("input", () => { clearTimeout(logQT); logQT = setTimeout(() => { LOG.q = $("logQ").value.trim().toLowerCase(); LOG.show = 400; renderLog(); }, 200); });
+$("logPause").onclick = () => { LOG.paused = !LOG.paused; if (!LOG.paused) renderLog(); else renderLogStatus(); };
+$("logCopy").onclick = async () => {
+  const txt = LOG.entries.filter((e) => logMatches(e)).slice(-1000).map((e) =>
+    `${new Date(e.ts * 1000).toLocaleString("de-DE")} ${e.lvl.padEnd(7)} [${LOG.areas[e.area] || e.area}] ${e.msg}`).join("\n");
+  try { await navigator.clipboard.writeText(txt); toast(`${nf(0).format(txt ? txt.split("\n").length : 0)} Zeilen kopiert`); }
+  catch (e) { toast("Kopieren nicht erlaubt – nimm „Datei ↓“", "err"); }
+};
+setInterval(() => { if (logVisible()) loadLog(); }, 4000);
+
+// Rotes Zeichen am Menüpunkt: Fehler seit dem letzten Blick ins Log
+function logSeen() { try { return +localStorage.getItem("nt-log-seen") || 0; } catch (e) { return 0; } }
+function markLogSeen() {
+  if (!logVisible()) return;
+  try { localStorage.setItem("nt-log-seen", String(Date.now() / 1000)); } catch (e) {}
+  $("logBadge").classList.add("hidden");
+}
+function renderLogBadge(s) {
+  const n = (s.log_errors || []).filter((t) => t > logSeen()).length;
+  $("logBadge").textContent = n > 9 ? "9+" : String(n);
+  $("logBadge").classList.toggle("hidden", !n || logVisible());
+  $("logBadge").parentElement.title = n ? `${n} neue Fehler im Log` : "";
+}
+
+// ---------- Zocker: Unterpunkte ----------
+const ZSUBS = ["overview", "markt", "trades"];
+let ZSUB = "overview";
+try { ZSUB = ZSUBS.includes(localStorage.getItem("nt-zsub")) ? localStorage.getItem("nt-zsub") : "overview"; } catch (e) {}
+function showZSub(k, quiet) {
+  ZSUB = k;
+  try { localStorage.setItem("nt-zsub", k); } catch (e) {}
+  ZSUBS.forEach((x) => $("zS-" + x).classList.toggle("hidden", x !== k));
+  $("zSub").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.zsub === k));
+  if (k === "overview" && STATE) renderChart(STATE);          // Grafiken brauchen die sichtbare Breite
+  if (k === "markt" && PC.data) renderPriceChart();
+  if (!quiet) window.scrollTo({ top: 0 });
+}
+$("zSub").querySelectorAll("button").forEach((b) => b.onclick = () => showZSub(b.dataset.zsub));
+showZSub(ZSUB, true);
+
 // ---------- Tabs ----------
-const TAB_HASH = { pm: "#portfolio", mine: "#mein-depot", bot: "#zocker" };
+const TAB_HASH = { pm: "#portfolio", mine: "#mein-depot", bot: "#zocker", log: "#log", set: "#einstellungen" };
+const TAB_EL = { pm: "tabPm", bot: "tabBot", mine: "tabMine", log: "tabLog", set: "tabSet" };
 function showTab(t) {
-  $("tabPm").classList.toggle("hidden", t !== "pm");
-  $("tabBot").classList.toggle("hidden", t !== "bot");
-  $("tabMine").classList.toggle("hidden", t !== "mine");
+  Object.entries(TAB_EL).forEach(([k, id]) => $(id).classList.toggle("hidden", k !== t));
   $("tabs").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
   try { history.replaceState(null, "", TAB_HASH[t]); } catch (e) {}
   if (t === "mine") loadMine();
-  else if (t === "bot" && STATE) { renderChart(STATE); if (PC.data) renderPriceChart(); }
+  else if (t === "bot" && STATE) showZSub(ZSUB, true);
+  else if (t === "log") { $("logBadge").classList.add("hidden"); loadLog(); }
+  else if (t === "set" && STATE) { renderZockerSettings(STATE); renderSystem(STATE); }
 }
 $("tabs").querySelectorAll("button").forEach((b) => b.onclick = () => showTab(b.dataset.tab));
 
@@ -1355,7 +1623,7 @@ setInterval(() => { if (!$("tabMine").classList.contains("hidden")) loadMine(); 
 
 let resizeT;
 addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (STATE) renderChart(STATE); if (PC.data) renderPriceChart(); }, 150); });
-setInterval(() => PC.symbol && !$("tabBot").classList.contains("hidden") && pcLoad(), 30000);
+setInterval(() => PC.symbol && zockerVisible() && ZSUB === "markt" && pcLoad(), 30000);
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (STATE) renderChart(STATE); if (PC.data) renderPriceChart(); });
 // Nur abfragen, was du gerade siehst: Zocker-Tab offen und Seite im Vordergrund -> häufig, sonst selten (nur Kopfzeile)
 function toast(msg, kind = "ok", ms) {

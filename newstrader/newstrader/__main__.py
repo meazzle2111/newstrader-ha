@@ -36,10 +36,14 @@ def setup_logging(verbose: bool) -> None:
     root.setLevel(logging.DEBUG if verbose else logging.INFO)
     console = logging.StreamHandler(sys.stdout)
     console.setFormatter(fmt)
-    file = logging.FileHandler(STATE_DIR / "bot.log", encoding="utf-8")
-    file.setFormatter(fmt)
+    from logging.handlers import RotatingFileHandler
+    from . import logbuf
+    logbuf.prefill(STATE_DIR / "bot.log")   # Log-Seite nach einem Neustart nicht leer
+    file = RotatingFileHandler(STATE_DIR / "bot.log", maxBytes=5_000_000, backupCount=2, encoding="utf-8")
+    file.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s [%(name)s] %(message)s", "%d.%m. %H:%M:%S"))
     root.addHandler(console)
     root.addHandler(file)
+    root.addHandler(logbuf.RingHandler())
     for noisy in ("yfinance", "httpx", "httpx2", "anthropic", "urllib3", "peewee"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     logging.getLogger("yfinance").setLevel(logging.CRITICAL)  # „possibly delisted“ bei jedem Abruf – fehlende Kurse fangen wir selbst ab

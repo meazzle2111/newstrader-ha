@@ -469,7 +469,7 @@ function createPortfolioView(opts) {
     if ($("TrCode")) $("TrCode").onsubmit = (ev) => { ev.preventDefault(); act("code", { code: ev.target.code.value }); };
     if ($("TrCancel")) $("TrCancel").onclick = () => act("cancel");
     if ($("TrSync")) $("TrSync").onclick = () => act("sync");
-    root().querySelectorAll("[data-cmp-reject]").forEach((x) => x.onclick = async () => {
+    document.querySelectorAll("[data-cmp-reject]").forEach((x) => x.onclick = async () => {
       if (!confirm(`${x.dataset.cmpName} nicht gekauft? Der Kauf wird aus dem Portfolio entfernt (das Cash kommt zurück).`)) return;
       const r = await POST("api/pf/action", { id: x.dataset.cmpReject, do: "reject" });
       if (!r.data.ok) { toast(r.data.error, "err"); return; }
@@ -587,8 +587,8 @@ function createPortfolioView(opts) {
     } finally { specPolling = false; }
   }
   function bindSpec() {
-    root().querySelectorAll("details.watch").forEach((d) => d.ontoggle = () => { PF.watchOpen = d.open; });
-    root().querySelectorAll("[data-copy]").forEach((b) => b.onclick = async () => {
+    document.querySelectorAll("details.watch").forEach((d) => d.ontoggle = () => { PF.watchOpen = d.open; });
+    document.querySelectorAll("[data-copy]").forEach((b) => b.onclick = async () => {
       try { await navigator.clipboard.writeText(b.dataset.copy); toast(`ISIN ${b.dataset.copy} kopiert – in der TR-App in die Suche einfügen`); }
       catch (e) { toast(`ISIN: ${b.dataset.copy}`, "info", 8000); }
     });
@@ -649,8 +649,9 @@ function createPortfolioView(opts) {
   }
 
   // ================================================================== Portfolio: Aufbau der Seite
-  const SUBS = [["overview", "Übersicht"], ["analyse", "Analyse"], ["verlauf", "Verlauf"], ["settings", "Einstellungen"]];
+  const SUBS = [["overview", "Übersicht"], ["analyse", "Analyse"], ["verlauf", "Verlauf"]];
   try { PF.sub = localStorage.getItem("nt-sub") || "overview"; } catch (e) { PF.sub = "overview"; }
+  if (!SUBS.some(([k]) => k === PF.sub)) PF.sub = "overview";   // „Einstellungen“ ist jetzt ein eigener Menüpunkt
   function renderModel(full) {
     const el = root();
     if (layout !== "model") {
@@ -661,8 +662,8 @@ function createPortfolioView(opts) {
         <div id="${P}S-analyse" class="hidden"><div id="${P}Kpi"></div>
           <section class="grid pf-two"><div id="${P}Perf"></div><div id="${P}AllocBox"></div></section>
           <div id="${P}Learn"></div><div id="${P}Monthly"></div><div id="${P}Risk"></div></div>
-        <div id="${P}S-verlauf" class="hidden"><div id="${P}Actions"></div><div id="${P}TxBox"></div></div>
-        <div id="${P}S-settings" class="hidden"><div id="${P}SpecSet"></div><div id="${P}Strategy"></div><div id="${P}Broker"></div><div id="${P}Alerts"></div></div>`;
+        <div id="${P}S-verlauf" class="hidden"><div id="${P}Actions"></div><div id="${P}TxBox"></div></div>`;
+      // Einstellungs-Karten (Trade Republic, Strategie, Spekulation, Geld) stehen im Menüpunkt „Einstellungen“ (index.html)
       root().querySelectorAll("[data-sub]").forEach((b) => b.onclick = () => showSub(b.dataset.sub));
       full = true;
     }
@@ -1304,10 +1305,12 @@ function createPortfolioView(opts) {
   }
 
   // ------------------------------------------------------------------ Start
-  function visible() { const t = document.getElementById(opts.tabEl); return !document.hidden && t && !t.classList.contains("hidden"); }
+  function visible() {
+    return !document.hidden && [].concat(opts.tabEl).some((id) => { const t = document.getElementById(id); return t && !t.classList.contains("hidden"); });
+  }
   document.addEventListener("DOMContentLoaded", () => {
-    document.querySelectorAll(`#tabs button[data-tab="${opts.tab}"]`).forEach((b) => b.addEventListener("click", () => load(true)));
-    if (visible() || location.hash === opts.hash) load(true);
+    [].concat(opts.tab).forEach((t) => document.querySelectorAll(`#tabs button[data-tab="${t}"]`).forEach((b) => b.addEventListener("click", () => load(true))));
+    if (visible() || [].concat(opts.hash).includes(location.hash)) load(true);
     setInterval(() => { if (visible()) load(false); }, 30000);               // Live-Kurse + Empfehlungen
     setInterval(() => { if (visible()) load(true); }, 10 * 60 * 1000);      // Verlauf/Risiko
     let rt;
@@ -1317,4 +1320,5 @@ function createPortfolioView(opts) {
 }
 
 window.realView = createPortfolioView({ prefix: "rv", root: "pf", api: "api/my", mode: "real", tab: "mine", tabEl: "tabMine", hash: "#mein-depot" });
-window.modelView = createPortfolioView({ prefix: "mv", root: "pm", api: "api/pf", mode: "model", tab: "pm", tabEl: "tabPm", hash: "#portfolio" });
+window.modelView = createPortfolioView({ prefix: "mv", root: "pm", api: "api/pf", mode: "model", tab: ["pm", "set"], tabEl: ["tabPm", "tabSet"],
+  hash: ["#portfolio", "#einstellungen"] });
