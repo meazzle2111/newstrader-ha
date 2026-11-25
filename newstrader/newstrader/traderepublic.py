@@ -396,7 +396,23 @@ def reconcile(cfg: Config, trades: list[dict], done: dict, symbol_ok, now: datet
                 t = pf.validate({**raw, "type": tr["side"], "symbol": sym, "isin": tr["isin"], "note": "Trade Republic"},
                                 txns, symbol_ok)
             except ValueError as e:
-                rep["problems"].append(f"{name}: {e}")
+                # TR ist die Vorgabe: Passt der Trade nicht ins Portfolio (z. B. mehr verkauft als gebucht), ersetzt er
+                # einen noch nicht verknüpften Vorschlag zum selben Wert – mit Stück, Kurs und Datum von TR.
+                absorb = sorted((a for a in acts if a.get("txn_id") and not a.get("tr_id") and a["symbol"] == sym
+                                 and a["side"] == tr["side"] and a["status"] in ("angenommen", "bestätigt", "angepasst")
+                                 and -MATCH_BEFORE <= when - datetime.fromisoformat(a["time"]) <= MATCH_AFTER),
+                                key=lambda a: abs((when - datetime.fromisoformat(a["time"])).total_seconds()))
+                for a in absorb:
+                    try:
+                        t = pf.update_txn(a["txn_id"], raw, symbol_ok, "model")
+                    except ValueError:
+                        continue
+                    a.update(status="angepasst", qty=t.qty, price=t.price, value=round(t.qty * t.price, 2), tr_id=tr["id"])
+                    done[tr["id"]] = t.id
+                    rep["corrected"].append(f"{a['name']} (wie bei Trade Republic: {t.qty:g} Stk)")
+                    break
+                else:
+                    rep["problems"].append(f"{name}: {e}")
                 continue
             short = -manager.cash_of(state["start_capital"], txns + [t]) if t.type == "buy" else 0
             if short > 0.005:  # Geld war bei TR offensichtlich da -> als Einzahlung nachbuchen
@@ -540,6 +556,52 @@ def drop_worthless_imports(cfg: Config, price_of, rep: dict) -> None:
             manager.save_state(state)
 
 
+def align_to_tr(cfg: Config, tr_holdings: dict[str, float], tr_cash: float | None, symbols: dict[str, str],
+                unsettled: set[str], price_of, rep: dict) -> None:
+    """Trade Republic ist die Vorgabe: Liegt im Portfolio mehr als bei TR, wird der Rest ausgebucht; weicht das Cash ab,
+    wird es per Ein-/Auszahlung angeglichen (ändert das eingesetzte Kapital, nicht die Rendite). Nur wenn bei TR keine
+    Buchung mehr unterwegs ist und keine Empfehlung auf Umsetzung wartet (die sind im Portfolio vorab gebucht)."""
+    cmp = compare_holdings(cfg, tr_holdings, symbols)
+    with manager._lock:
+        state = manager.load_state()
+        acts = state.setdefault("actions", [])
+        waiting = any(a["status"] == "angenommen" and a.get("txn_id") and a["side"] in ("buy", "sell") for a in acts)
+        now = datetime.now(timezone.utc)
+        changed = False
+        for r in cmp["rows"]:
+            if r["ok"] or r["pending"] or r["tr"] is None or r["isin"] in unsettled or r["book"] <= r["tr"] + 1e-4:
+                continue
+            qty = round(r["book"] - r["tr"], 6)
+            txns = pf.load_txns("model")
+            px = price_of(r["symbol"]) or next((t.price for t in sorted(txns, key=pf.sort_key, reverse=True)
+                                                if t.symbol == r["symbol"] and t.price > 0), None)
+            if not px:
+                rep["problems"].append(f"{r['name']}: kein Kurs für den Abgleich")
+                continue
+            try:
+                t = pf.validate({"date": now.astimezone(pf.BERLIN).date().isoformat(), "type": "sell", "symbol": r["symbol"],
+                                 "qty": qty, "price": px, "fee": 0, "isin": r["isin"],
+                                 "note": "Abgleich mit Trade Republic"}, txns, lambda s_: True)
+            except ValueError as e:
+                rep["problems"].append(f"{r['name']}: {e}")
+                continue
+            pf.save_txns(txns + [t], "model")
+            a = manager._action("manual", "sell", r["symbol"], r["name"], qty, px,
+                                f"Abgleich mit Trade Republic: dort {r['tr']:g} Stk, im Portfolio waren {r['book']:g}", now)
+            a.update(txn_id=t.id, status="eigene")
+            acts.append(a)
+            rep.setdefault("aligned", []).append(f"{r['name']} −{qty:g} Stk")
+            changed = True
+        if tr_cash is not None and not unsettled and not waiting:
+            diff = round(tr_cash - manager.cash_of(state["start_capital"], pf.load_txns("model")), 2)
+            if abs(diff) >= 1.0:
+                _flow(state, diff, "Cash-Abgleich mit Trade Republic")
+                rep["cash_aligned"] = diff
+                changed = True
+        if changed:
+            manager.save_state(state)
+
+
 def compare_holdings(cfg: Config, tr_holdings: dict[str, float], symbols: dict[str, str]) -> dict:
     """Stückzahlen im Portfolio gegen Trade Republic. Positionen nur bei TR sind evtl. Altbestand außerhalb des Portfolios."""
     txns = pf.load_txns("model")
@@ -598,6 +660,10 @@ def _summary(rep: dict) -> str:
         parts.append(f"Kleinstreste ohne Kurs entfernt: {', '.join(rep['removed'])}")
     if rep.get("deposits"):
         parts.append(f"Einzahlung nachgebucht: {sum(rep['deposits']):.2f} €".replace(".", ","))
+    if rep.get("aligned"):
+        parts.append(f"An Trade Republic angeglichen: {', '.join(rep['aligned'][:5])}")
+    if rep.get("cash_aligned"):
+        parts.append(f"Cash an Trade Republic angeglichen ({rep['cash_aligned']:+.2f} €)".replace(".", ","))
     if rep["problems"]:
         parts.append("⚠️ " + "; ".join(rep["problems"][:3]))
     return "\n".join(parts)
@@ -672,8 +738,11 @@ def _sync_once(cfg: Config, notify, d: dict) -> None:
         import_positions(cfg, tr_holdings, d["symbols"], unsettled, symbol_ok,
                          lambda sym: live_price(cfg, sym)[0], rep)
         drop_worthless_imports(cfg, lambda sym: live_price(cfg, sym)[0], rep)
+        unsettled = {t["isin"] for t in trades if t["id"] not in d["done"] and t.get("isin")}
+        align_to_tr(cfg, tr_holdings, cash, d["symbols"], unsettled, lambda sym: live_price(cfg, sym)[0], rep)
     d.update(report=rep, cash=cash, error=None, last_ok=d["last"])
-    if rep["matched"] or rep["corrected"] or rep["new"] or rep["dividends"] or rep["imported"] or rep["deposits"] or rep.get("removed"):
+    if (rep["matched"] or rep["corrected"] or rep["new"] or rep["dividends"] or rep["imported"] or rep["deposits"]
+            or rep.get("removed") or rep.get("aligned") or rep.get("cash_aligned")):
         d["changes"] = {"time": d["last"], "report": rep}
     if tr_holdings is not None:
         d["compare"] = compare_holdings(cfg, tr_holdings, d["symbols"])
