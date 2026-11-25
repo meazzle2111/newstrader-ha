@@ -1069,7 +1069,7 @@ function createPortfolioView(opts) {
     const pts = (d.prices || []).filter((p) => p[1] != null);
     if (pts.length < 2) { box.innerHTML = `<div class="empty" style="padding:50px 0">Für diesen Zeitraum gibt es keine Kurse${["1h", "1T"].includes(PF.posRange) ? " (Börse heute noch zu?)" : ""}.</div>`; return; }
     const T = pts.map((p) => tOf(p[0])), t0 = T[0], t1 = T[T.length - 1];
-    const W = Math.max(260, box.clientWidth), H = 160, m = { l: 4, r: 58, t: 10, b: 20 };
+    const W = Math.max(260, box.clientWidth), H = box.clientWidth > 700 ? 230 : 160, m = { l: 4, r: 58, t: 10, b: 20 };
     const intra = ["1h", "1T"].includes(PF.posRange);
     const marks = intra ? [] : (d.trades || []).map((t) => ({ ...t, ts: tOf(t.date) })).filter((t) => t.ts >= t0 - 864e5 && t.ts <= t1 + 864e5);
     const vals = pts.map((p) => p[1]).concat(d.avg_price ? [d.avg_price] : [], marks.map((t) => t.price));
@@ -1500,7 +1500,7 @@ function createPortfolioView(opts) {
     setInterval(() => { if (visible()) load(false); }, 30000);               // Live-Kurse + Empfehlungen
     setInterval(() => { if (visible()) load(true); }, 10 * 60 * 1000);      // Verlauf/Risiko
     let rt;
-    addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (visible()) { drawPerf(); if (MODE === "model") drawValue(); } }, 150); });
+    addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (visible()) { drawPerf(); if (MODE === "model") { drawValue(); openPos.forEach((sym) => drawPosChart(sym)); } } }, 150); });
   });
   return load;
 }
