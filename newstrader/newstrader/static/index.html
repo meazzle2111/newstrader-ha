@@ -836,7 +836,7 @@ function renderPositions(s) {
   const lev = r.mode === "leverage";
   const real = s.positions.some((p) => p.product);
   $("posHint").textContent = r.strategy === "momentum"
-    ? `Höchstens ${s.momentum?.rules.positions ?? 3} Positionen, je ein Drittel des Kontos. Stop ${nf(0).format(r.stop_loss * 100)} % unter Einstand bzw. ${nf(0).format(r.trailing * 100)} % unter dem besten Kurs.`
+    ? `Höchstens ${s.momentum?.rules.positions ?? 3} Positionen, je ein Drittel des Kontos. Stop und Trailing-Stop bei Scheinen ~${nf(0).format((s.momentum?.rules.stop_product ?? 0.12) * 100)} % (vor der Knock-out-Schwelle), bei Aktien ${nf(0).format(r.stop_loss * 100)} %.`
     : real
     ? `Echte Knock-out-Scheine von Trade Republic. Der Stop liegt vor der Knock-out-Schwelle. Wird die Schwelle erreicht, ist der Einsatz weg.`
     : `Stop-Loss bei ${nf(0).format(r.stop_loss * 100)} % gegen die Position, Trailing-Stop ${nf(0).format(r.trailing * 100)} % vom besten Kurs`;
@@ -1311,14 +1311,15 @@ function renderZockerSettings(s) {
       <div><b>Auswahl:</b> die Aktien mit der stärksten Kursentwicklung der letzten 6 Monate (ohne die letzte Woche).</div>
       <div><b>Positionen:</b> höchstens ${R.positions}, je ein Drittel des Kontos – wenige, große Wetten.</div>
       <div><b>Hebel:</b> echte Knock-out-Scheine von Trade Republic mit Hebel ${nf(1).format(R.lev[0])}–${nf(1).format(R.lev[2])}x
-        (Ziel ${nf(0).format(R.lev[1])}x, Knock-out-Schwelle rund 50 % entfernt). Gibt es keinen, die Aktie selbst.</div>
-      <div><b>Verkauf:</b> wenn der Wert nicht mehr unter den besten ${R.keep} ist, oder ${nf(0).format(R.stop * 100)} % unter Einstand
-        bzw. ${nf(0).format(R.trailing * 100)} % unter dem besten Kurs. Keine Leerverkäufe.</div>
+        (Ziel ${nf(0).format(R.lev[1])}x, Knock-out-Schwelle rund ${nf(0).format(100 / R.lev[1])} % entfernt). Gibt es keinen, die Aktie selbst.</div>
+      <div><b>Verkauf:</b> wenn der Wert nicht mehr unter den besten ${R.keep} ist, oder beim Stop: bei Scheinen
+        ~${nf(0).format(R.stop_product * 100)} % unter Einstand bzw. dem besten Kurs (vor der Knock-out-Schwelle), bei Aktien
+        ${nf(0).format(R.stop * 100)} %. Keine Leerverkäufe.</div>
     </div>
-    <div class="name" style="padding:10px 16px 16px;line-height:1.5">Warum so: Im Test über 5 Jahre (2022–2026, drei getrennte Abschnitte)
-      war das in jedem Abschnitt im Plus. Die alten Signal-Regeln verloren bei jeder Einstellung. Mehr Hebel als ~2,5x
-      brach im letzten Abschnitt ein, 12x führte in jeder Variante zum Totalverlust. Die Testzahlen sind geschönt, weil die
-      Beobachtungsliste nur heute bekannte Werte enthält – eine Garantie ist das nicht.</div>`;
+    <div class="name" style="padding:10px 16px 16px;line-height:1.5">Backtest 2022–2026 (Tagestief, Kurslücken, Finanzierung):
+      5x brachte +2060 %, fiel zwischendurch aber bis −90 % und endete in 44 % der Nachbar-Einstellungen im Totalverlust.
+      2x war am stabilsten, 10x ging in jeder Einstellung pleite. Die Zahlen sind geschönt, weil die Beobachtungsliste nur heute
+      bekannte Werte enthält – eine Garantie ist das nicht.</div>`;
 }
 
 function renderMomentum(s) {

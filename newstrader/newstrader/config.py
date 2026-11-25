@@ -174,7 +174,9 @@ class Config:
 # Zocker: ein festes Setup – Momentum mit wenigen großen Positionen (Entscheidung 25.11.2026 nach Backtests).
 # 5 Jahre Tageskurse, 228 Werte, drei getrennte Abschnitte (2022–2026): Momentum war in jedem Abschnitt und in jeder
 # Nachbar-Einstellung positiv; die bisherigen Technik-/Nachrichtensignale verloren bei jeder Einstellung (auch ohne Hebel),
-# Shorts verschlechterten alles, Hebel ≥ 3 brach im letzten Abschnitt ein, 12x war in jeder Variante ruinös.
+# Shorts verschlechterten alles, 10–12x war in jeder Variante ruinös.
+# Hebel 5x auf deinen Wunsch (25.11.2026). Backtest mit Tagestief/Kurslücken: +2060 % in 4 Jahren, aber Rückgang bis −90 %
+# und in 44 % der Nachbar-Einstellungen Totalverlust. 2x war robuster (nie ein Abschnitt unter −13 %).
 # Achtung: Die Beobachtungsliste besteht aus heute bekannten Werten – das schönt jeden Backtest (Überlebende).
 ZOCKER: dict = {
     "zocker_strategy": "momentum",
@@ -188,14 +190,14 @@ ZOCKER: dict = {
     "max_position_pct": 1 / 3,
     "min_cash_reserve_pct": 0.0,
     "max_gross_exposure": 3.0,
-    "stop_loss_pct": 0.25,          # Stop 25 % unter Einstand …
-    "trailing_stop_pct": 0.25,      # … bzw. 25 % unter dem besten Kurs (Gewinner laufen lassen)
+    "stop_loss_pct": 0.25,          # Obergrenze; bei Scheinen gilt 60 % des Abstands zur Knock-out-Schwelle (5x: ~12 %) …
+    "trailing_stop_pct": 0.25,      # … für Stop und Trailing-Stop
     "lock_after_pct": 0.0, "lock_trailing_pct": 0.0, "take_profit_pct": 0.0, "max_hold_days": 0.0,
     "max_margin_factor": 0.0, "rotate_gap": 0.0,
-    "real_products": True,          # echte TR-Knock-outs mit Hebel um 2 (KO-Schwelle ~50 % entfernt) …
-    "product_target_leverage": 2.0,
-    "product_min_leverage": 1.6,
-    "product_max_leverage": 2.6,    # … gibt es keinen passenden Schein, wird die Aktie selbst gekauft (1x)
+    "real_products": True,          # echte TR-Knock-outs mit Hebel um 5 (KO-Schwelle ~20 % entfernt) …
+    "product_target_leverage": 5.0,
+    "product_min_leverage": 4.0,
+    "product_max_leverage": 6.5,    # … gibt es keinen passenden Schein, wird die Aktie selbst gekauft (1x)
     "product_stop_share": 0.6,
     "product_searches_per_cycle": 6,
 }

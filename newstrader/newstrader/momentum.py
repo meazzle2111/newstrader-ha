@@ -2,9 +2,10 @@
 
 Regeln (Einstellungen in config.ZOCKER):
 - Rangliste: Kursveränderung der letzten ~6 Monate ohne die letzte Woche, nur Werte mit positivem Wert.
-- Gekauft werden die besten 3 (je ⅓ des Kontos), über echte Knock-out-Scheine mit Hebel um 2 – gibt es keinen
+- Gekauft werden die besten 3 (je ⅓ des Kontos), über echte Knock-out-Scheine mit Hebel um 5 – gibt es keinen
   passenden Schein, die Aktie selbst.
-- Verkauft wird, wenn ein Wert aus den besten 6 fällt, oder über Stop-Loss / Trailing-Stop (25 %).
+- Verkauft wird, wenn ein Wert aus den besten 6 fällt, oder über Stop-Loss / Trailing-Stop (bei Scheinen 60 % des
+  Abstands zur Knock-out-Schwelle, bei 5x also ~12 %; bei Aktien 25 %).
 - Nach einem Stop wird derselbe Wert ~1 Tag nicht wieder gekauft.
 """
 from __future__ import annotations
@@ -126,7 +127,7 @@ def run(broker, cfg: Config, snaps: dict) -> None:
             if margin < 50:
                 continue
             via = (f"via {product['name']} ({product['isin']}), KO {product['barrier']:g} {product.get('currency', '')}"
-                   if product else "Aktie direkt (kein passender Schein mit Hebel um 2)")
+                   if product else f"Aktie direkt (kein passender Schein mit Hebel um {cfg.product_target_leverage:g})")
             broker.open(sym, "long", snap.price, margin, lev,
                         f"Momentum Platz {i + 1}: {r['mom']:+.0%} in 6 Monaten · {lev:g}x {via}",
                         product=product, entry={"strategy": "momentum", "mom": r["mom"], "rank": i + 1, "lev": lev})
@@ -141,5 +142,6 @@ def view(cfg: Config, held: set[str]) -> dict:
             "ranking": [{**r, "rank": i + 1, "held": r["symbol"] in held} for i, r in enumerate(d["ranking"][:10])],
             "cooldown": sorted(d["cooldown"]),
             "rules": {"positions": cfg.mom_positions, "keep": cfg.mom_keep_rank, "stop": cfg.stop_loss_pct,
+                      "stop_product": min(cfg.stop_loss_pct, cfg.product_stop_share / cfg.product_target_leverage),
                       "trailing": cfg.trailing_stop_pct, "lev": [cfg.product_min_leverage, cfg.product_target_leverage,
                                                                  cfg.product_max_leverage]}}
