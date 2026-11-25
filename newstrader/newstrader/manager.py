@@ -409,6 +409,16 @@ def _push_actions(cfg: Config, actions: list[dict], notify) -> None:
             label = {"stop": "Stop-Loss", "trim": "Teilverkauf", "rapid": "Kurssturz",
                      "cash": "Cash für Hebel-Trade"}.get(a["kind"], "Verkaufen")
             lines.append(f"🔴 {label}: {q} × {a['name']} zu ca. {_fmt(a['price'])} € (≈ {_fmt(a['value'], 0)} €)")
+        chk = a.get("check")
+        if chk:
+            f = chk.get("final") or {}
+            who = "Claude" if chk.get("final_by") == "claude" else "Gemini" if chk.get("final_by") else ""
+            if f.get("verdict") == "bedenken":
+                lines.append(f"   ⚠️ {who}: {f.get('reason', '')}")
+            elif f.get("verdict") == "ok":
+                lines[-1] += f" · ✓ {'Gemini + Claude' if chk.get('pre') and who == 'Claude' else who}"
+            else:
+                lines[-1] += " · ungeprüft"
     if len(actions) > 8:
         lines.append(f"… und {len(actions) - 8} weitere")
     title = "📋 Depot: " + ("Aufbau – bitte kaufen" if actions[0]["kind"] == "setup" else
@@ -611,7 +621,7 @@ def decide(cfg: Config, notify, names: dict, prices: dict[str, float], key: str)
         p["price"] = p["price"] or prices.get(p["symbol"]) or p["avg_price"]
     cash = cash_of(state["start_capital"], pf.load_txns("model"))
     plan = plan_holistic(cfg, positions, signals, cash, st, state, names, now)
-    acts = _execute(cfg, plan, notify)
+    acts = _execute(cfg, _vet(cfg, plan, notify), notify)
     regime_now = state.get("regime")
     with _lock:
         state = load_state()
@@ -673,7 +683,7 @@ def cash_check_after_plan(cfg: Config, notify, names: dict) -> list[dict]:
                            {s: h["price"] for s, h in held.items()}, cash, total, state, now)
     acts = [_action("cash", t["side"], t["symbol"], names.get(t["symbol"], t["symbol"]), t["qty"], t["price"],
                     t["reason"] + " · bitte vor 9 Uhr verkaufen", now) for t in trades]
-    done = _execute(cfg, acts, notify)
+    done = _execute(cfg, _vet(cfg, acts, notify), notify)
     with _lock:
         state = load_state()
         state["cash_checked"] = plan.get("created")
@@ -938,6 +948,24 @@ def _run_setup(cfg: Config, capital: float, style: str, notify) -> None:
 
 
 # --------------------------------------------------------------------------- Wertverlauf
+ANALYST = None   # vom Bot gesetzt – für die KI-Prüfung der Vorschläge (Gemini vor, Claude entscheidet)
+
+
+def _vet(cfg: Config, actions: list[dict], notify) -> list[dict]:
+    """Vorschläge vor dem Push zweistufig prüfen lassen; verworfene gehen nicht raus (mit Hinweis)."""
+    if not actions or ANALYST is None:
+        return actions
+    from . import pruefung
+    progress = (lambda t: _check.update(step=t)) if _check.get("running") else None
+    try:
+        ok, rejected = pruefung.review(cfg, ANALYST, actions, pruefung.context_for(cfg, actions), progress=progress)
+    except Exception:  # noqa: BLE001 – die Prüfung darf die Empfehlungen nie verschlucken
+        log.exception("Vorschlagsprüfung fehlgeschlagen – Vorschläge gehen ungeprüft raus")
+        return actions
+    pruefung.notify_rejected(cfg, notify, rejected)
+    return ok
+
+
 VALUES_FILE = STATE_DIR / "model_values.json"
 POS_VALUES_FILE = STATE_DIR / "model_values_pos.jsonl"   # je Minute: Cash + Wert jeder Position (Multigraph)
 _last_record = [0.0]

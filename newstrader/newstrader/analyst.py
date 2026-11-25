@@ -374,29 +374,36 @@ class NewsAnalyst:
             except GeminiError as e:
                 log.info("Gemini nicht verfügbar (%s) – versuche Claude", e)
         if self.backend == "cli" and self.claude_ok():
-            cmd = [self.cli, "-p", prompt, "--output-format", "json", "--json-schema", json.dumps(schema),
-                   "--system-prompt", system, "--tools", "", "--no-session-persistence"]
-            if self.cfg.claude_cli_model:
-                cmd += ["--model", self.cfg.claude_cli_model]
-            env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=240, env=env, cwd=STATE_DIR)
-            out = json.loads(proc.stdout or "{}")
-            if out.get("is_error") or proc.returncode != 0:
-                msg = str(out.get("result") or proc.stderr)[:200]
-                if any(w in msg.lower() for w in ("limit", "rate", "quota", "usage")):
-                    self._pause(3600, "Abo-Limit erreicht", RuntimeError(msg))
-                raise RuntimeError(msg)
-            usage = out.get("usage") or {}
-            self._book(int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0)),
-                       usd=float(out.get("total_cost_usd") or 0.0))
-            data = out.get("structured_output")
-            if not isinstance(data, dict):
-                m = re.search(r"\{.*\}", str(out.get("result", "")), re.S)
-                if not m:
-                    raise RuntimeError("keine JSON-Antwort von Claude")
-                data = json.loads(m.group(0))
-            return data, "claude"
+            return self.ask_claude_json(system, prompt, schema), "claude"
         raise RuntimeError("keine KI verfügbar (Gemini und Claude am Limit oder nicht eingerichtet)")
+
+    def ask_claude_json(self, system: str, prompt: str, schema: dict, timeout: int = 240) -> dict:
+        """Gezielt Claude fragen (Kommandozeile mit deinem Abo), ohne Gemini – z. B. für die Zweitmeinung zu
+        Depot-Empfehlungen. Wirft RuntimeError, wenn Claude gerade nicht verfügbar ist."""
+        if self.backend != "cli" or not self.claude_ok():
+            raise RuntimeError("Claude nicht verfügbar (" + (self.status() if self.backend else "kein Token") + ")")
+        cmd = [self.cli, "-p", prompt, "--output-format", "json", "--json-schema", json.dumps(schema),
+               "--system-prompt", system, "--tools", "", "--no-session-persistence"]
+        if self.cfg.claude_cli_model:
+            cmd += ["--model", self.cfg.claude_cli_model]
+        env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env, cwd=STATE_DIR)
+        out = json.loads(proc.stdout or "{}")
+        if out.get("is_error") or proc.returncode != 0:
+            msg = str(out.get("result") or proc.stderr)[:200]
+            if any(w in msg.lower() for w in ("limit", "rate", "quota", "usage")):
+                self._pause(3600, "Abo-Limit erreicht", RuntimeError(msg))
+            raise RuntimeError(msg)
+        usage = out.get("usage") or {}
+        self._book(int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0)),
+                   usd=float(out.get("total_cost_usd") or 0.0))
+        data = out.get("structured_output")
+        if not isinstance(data, dict):
+            m = re.search(r"\{.*\}", str(out.get("result", "")), re.S)
+            if not m:
+                raise RuntimeError("keine JSON-Antwort von Claude")
+            data = json.loads(m.group(0))
+        return data
 
     def _ask_claude(self, symbol: str, headlines: list[Headline], context: str) -> NewsSignal:
         user = self._prompt(symbol, headlines, context)

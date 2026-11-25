@@ -15,7 +15,7 @@ MAX = 3000
 AREAS = {"bot": "Bot", "depot": "Depot", "ki": "KI", "tr": "Trade Republic", "spek": "Spekulation",
          "daten": "Kursdaten", "system": "System"}
 _AREA_OF = {
-    "bot": "bot", "strategy": "bot", "broker": "bot", "learning": "bot",
+    "bot": "bot", "strategy": "bot", "broker": "bot", "learning": "bot", "momentum": "bot",
     "manager": "depot", "allocator": "depot", "portfolio": "depot", "portfolio_service": "depot",
     "pf_learning": "depot", "review": "depot", "mydepot": "depot", "reports": "depot",
     "analyst": "ki", "gemini": "ki",

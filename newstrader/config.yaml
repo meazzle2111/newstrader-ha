@@ -1,5 +1,5 @@
 name: NewsTrader
-version: "0.19.0"
+version: "0.20.0"
 slug: newstrader
 description: Paper-Trading-Bot mit Nachrichtenanalyse (Spielgeld) und Signalen für dein Depot
 arch:

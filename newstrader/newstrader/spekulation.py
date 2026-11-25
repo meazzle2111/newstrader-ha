@@ -524,12 +524,36 @@ def publish(cfg: Config, notify, day: str) -> dict | None:
             lines.append(f"⚠️ Im Portfolio sind nur {_fmt(cash_now, 0)} € Cash – für diesen Einsatz fehlen ca. "
                          f"{_fmt(stake - cash_now, 0)} € (kleiner einsteigen oder Cash nachlegen).")
             prop["cash_short"] = round(stake - cash_now, 2)
-        from .mydepot import tr_url
-        link = tr_url((ko or {}).get("isin") or idea["isin"])
+        # Zweistufige KI-Prüfung vor dem Push: Gemini prüft vor, Claude entscheidet
+        chk = None
         try:
-            notify(cfg, f"🎲 Spekulation ({note}): {side} {idea['name']}", "\n".join(lines), url=link)
-        except TypeError:
-            notify(cfg, f"🎲 Spekulation ({note}): {side} {idea['name']}", "\n".join(lines))
+            from . import pruefung
+            hl = _headlines(idea["symbol"])[:8]
+            chk = pruefung.review_spec(ANALYST, "\n".join(lines) + ("\nAktuelle Schlagzeilen:\n" + "\n".join(f"- {h}" for h in hl)
+                                                                   if hl else ""))
+        except Exception:  # noqa: BLE001 – die Prüfung darf den Vorschlag nie verschlucken
+            log.exception("Spekulation: KI-Prüfung fehlgeschlagen – Vorschlag geht ungeprüft raus")
+        f = (chk or {}).get("final") or {}
+        who = "Claude" if (chk or {}).get("final_by") == "claude" else "Gemini"
+        if chk:
+            prop["check"] = chk
+        if f.get("verdict") == "verwerfen":
+            prop.update(result="verworfen", note=f"KI-Prüfung ({who}): {f.get('reason', '')}")
+            notify(cfg, "🎲 Spekulation heute: kein Trade", f"Geplant war {side} {idea['name']}, aber die Prüfung "
+                   f"(Gemini → Claude) hat den Trade verworfen: {f.get('reason', '')}")
+        else:
+            if f.get("verdict") == "bedenken":
+                lines.insert(2, f"⚠️ {who}: {f.get('reason', '')}")
+            elif f.get("verdict") == "ok":
+                lines.append(f"✓ Geprüft von {'Gemini + Claude' if chk.get('pre') and who == 'Claude' else who}: {f.get('reason', '')}")
+            else:
+                lines.append("(ungeprüft – keine KI erreichbar)")
+            from .mydepot import tr_url
+            link = tr_url((ko or {}).get("isin") or idea["isin"])
+            try:
+                notify(cfg, f"🎲 Spekulation ({note}): {side} {idea['name']}", "\n".join(lines), url=link)
+            except TypeError:
+                notify(cfg, f"🎲 Spekulation ({note}): {side} {idea['name']}", "\n".join(lines))
     with _lock:
         d = load()
         d["plans"][day] = {**plan, "published": True}

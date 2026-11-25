@@ -252,7 +252,7 @@ def _note_veto(d: dict, r: dict, snap, now: datetime, text: str) -> None:
                         "price": snap.price, "price_now": snap.price, "news": round(snap.news.score, 3),
                         "mom": r["mom"], "why": text[:200]})
     d["vetoes"] = d["vetoes"][-50:]
-    log.info("Momentum: %s übersprungen – Nachrichtenlage klar negativ (%+.2f): %s", sym, snap.news.score, text[:160])
+    log.info("Momentum: %s übersprungen – %s", sym, text[:200])
 
 
 def run(broker, cfg: Config, snaps: dict) -> None:

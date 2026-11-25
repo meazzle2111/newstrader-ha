@@ -484,6 +484,8 @@ def run_forever(cfg: Config, stop: threading.Event | None = None) -> None:
         analyst = NewsAnalyst(cfg)
         from . import spekulation
         spekulation.ANALYST = analyst
+        from . import manager as _mgr
+        _mgr.ANALYST = analyst            # KI-Prüfung der Depot-Vorschläge (Gemini vor, Claude entscheidet)
         from . import manager as _m
         times = _m.decision_times(cfg, _m.load_state())
         log.info("Bot läuft – Kurse & Technik alle %.0f Min., Nachrichten/Claude stündlich, Portfolio-Prüfung Mo–Fr %s",

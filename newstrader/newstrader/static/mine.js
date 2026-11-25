@@ -196,7 +196,7 @@ function createPortfolioView(opts) {
         <td><span class="sym" style="${off ? "text-decoration:line-through" : ""}">${esc(a.name)}</span><div class="name">${esc(a.symbol)}</div></td>
         <td class="num">${a.side === "dividend" ? "–" : nf(a.qty % 1 ? 4 : 0).format(a.qty)}</td>
         <td class="num">${nf(2).format(a.price)} €<div class="name">${eur(a.value)}</div></td>
-        <td><div class="reason">${esc(a.reason)}</div></td>
+        <td><div class="reason">${esc(a.reason)}</div>${checkHtml(a.check, true)}</td>
         <td style="white-space:nowrap"><div class="status ${STATUS_CLS[a.status] || ""}" style="margin-bottom:4px">${STATUS[a.status] || a.status}</div>
           ${open ? btn("✓ Bestätigen", 'data-do="confirm"', true) + " " : ""}${editable ? btn("ändern", 'data-do="adjust"') + " " + btn("nicht gemacht", 'data-do="reject"') : ""}</td></tr>
         <tr class="hidden" data-form="${esc(a.id)}"><td colspan="7"></td></tr>`;
@@ -509,6 +509,7 @@ function createPortfolioView(opts) {
         ${now != null && !h.result ? `<div class="kv"><span>Stand (Schein, ca.)</span><b class="${cls(now)}">${pct(now, 0)}</b></div>` : ""}
         ${h.result && h.product_pct != null ? `<div class="kv"><span>Ergebnis (Schein, ca.)</span><b class="${cls(h.product_pct)}">${pct(h.product_pct, 0)}</b></div>` : ""}
         <div class="reason" style="max-width:none">${esc(h.rationale || h.note || "")}</div>
+        ${checkHtml(h.check)}
         ${!h.result || h.result === "offen" ? `<div class="field" style="padding:4px 0 0">
           <a class="btn" href="https://app.traderepublic.com/instrument/${encodeURIComponent((h.ko && h.ko.isin) || h.isin)}" target="_blank" rel="noopener">In Trade Republic öffnen ↗</a>
           ${h.ko ? `<button class="btn ghost" data-copy="${esc(h.ko.isin)}">ISIN kopieren</button>` : ""}</div>` : ""}</div>`;
@@ -673,7 +674,7 @@ function createPortfolioView(opts) {
     if (layout !== "model") {
       layout = "model";
       el.innerHTML = `<nav class="subnav" id="${P}Sub">${SUBS.map(([k, v]) => `<button data-sub="${k}">${v}</button>`).join("")}</nav>
-        <div id="${P}S-overview"><div id="${P}Value"></div><div id="${P}Todo"></div><div id="${P}Spec"></div>
+        <div id="${P}S-overview"><div id="${P}Value"></div><div id="${P}Todo"></div><div id="${P}Rejected"></div><div id="${P}Spec"></div>
           <div id="${P}Today"></div><div id="${P}Pos"></div></div>
         <div id="${P}S-analyse" class="hidden"><div id="${P}Kpi"></div>
           <section class="grid pf-two"><div id="${P}Perf"></div><div id="${P}AllocBox"></div></section>
@@ -687,6 +688,7 @@ function createPortfolioView(opts) {
     const keep = PF.todoOpen && document.querySelector(`#${P}Todo [data-todo-id="${PF.todoOpen}"] .todo-form:not(.hidden)`)
       && unconfirmed().some((a) => a.id === PF.todoOpen);
     if (!keep) { PF.todoOpen = null; set("Todo", todoCard()); bindTodo(); }
+    set("Rejected", rejectedCard());
     set("Spec", specCard()); bindSpec();
     if (full) { set("SpecSet", specSettingsCard()); bindSpec(); }
     set("Pos", positionList()); bindPositionList();
@@ -720,6 +722,30 @@ function createPortfolioView(opts) {
     if (!quiet) window.scrollTo({ top: 0 });
   }
 
+  // ------------------------------------------------------------------ KI-Prüfung (Gemini vor, Claude entscheidet)
+  const VERD = { ok: ["✓", "up"], bedenken: ["⚠", "warnc"], verwerfen: ["✕", "down"] };
+  function checkHtml(c, compact) {
+    if (!c) return "";
+    const row = (who, r) => r ? `<div><b class="${VERD[r.verdict]?.[1] || ""}">${VERD[r.verdict]?.[0] || ""} ${esc(who)}: ${esc(r.verdict)}</b> – ${esc(r.reason)}</div>` : "";
+    if (compact) {
+      const f = c.final;
+      return f ? `<div class="chk"><span class="${VERD[f.verdict]?.[1] || ""}">${VERD[f.verdict]?.[0] || ""}</span> ${esc(c.final_by === "claude" ? "Claude" : "Gemini")}: ${esc(f.reason)}</div>`
+        : `<div class="chk name">${esc(c.note || "ungeprüft")}</div>`;
+    }
+    return `<div class="chk">🧠 ${row("Gemini (Vorprüfung)", c.pre)}${row(c.final_by === "claude" ? "Claude" : "Gemini", c.final)}
+      ${c.note ? `<div class="name">${esc(c.note)}</div>` : ""}</div>`;
+  }
+  function rejectedCard() {
+    const rj = PF.state?.rejected || [];
+    if (!rj.length) return "";
+    return `<section class="card" style="margin-bottom:14px"><div class="todo-head"><h2>🧠 Von der KI-Prüfung verworfen</h2>
+        <span class="name">letzte 7 Tage · ${rj.length}</span></div>
+      <div class="hint">Diese Vorschläge der Regeln hat die Prüfung (Gemini vor, Claude entscheidet) nicht freigegeben – sie wurden nicht gebucht.</div>
+      <div style="padding:8px 16px 12px">${rj.slice(0, 6).map((a) => `<div class="cmp-row"><div style="min-width:0">
+        <b>${a.side === "buy" ? "Kauf" : "Verkauf"} ${esc(a.name)}</b> <span class="name">${nf(a.qty % 1 ? 4 : 0).format(a.qty)} Stk · ${dt(a.time)}</span>
+        ${checkHtml(a.check)}</div></div>`).join("")}</div></section>`;
+  }
+
   // ------------------------------------------------------------------ Zu erledigen (nur offene Empfehlungen)
   function todoCard() {
     const open = unconfirmed();
@@ -733,6 +759,7 @@ function createPortfolioView(opts) {
         <div class="todo-main"><b>${qty} × ${esc(a.name)}</b> <span class="name">${esc(a.symbol)}</span></div>
         <div class="todo-sub">zu ca. <b>${nf(2).format(a.price)}&nbsp;€</b> = ${eur(a.value)}${buy ? ` · Stop-Loss bei&nbsp;${nf(2).format(a.price * (1 - (PF.state?.strategy?.values?.stop || 0.1)))}&nbsp;€` : ""}</div>
         <div class="reason" style="max-width:none">${esc(a.reason)}</div>
+        ${checkHtml(a.check)}
         <div class="todo-btns">${btn("✓ Erledigt", 'data-t="done"', true)}${btn("Anders gemacht", 'data-t="other"')}${btn("Nicht gemacht", 'data-t="no"')}</div>
         ${a.isin ? `<a class="btn ghost tr-link" href="https://app.traderepublic.com/instrument/${encodeURIComponent(a.isin)}" target="_blank" rel="noopener">In Trade Republic öffnen ↗</a>` : ""}
         <div class="todo-form hidden"></div></div>`;
