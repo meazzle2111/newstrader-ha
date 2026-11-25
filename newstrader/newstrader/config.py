@@ -185,7 +185,9 @@ class Config:
 # und in 44 % der Nachbar-Einstellungen Totalverlust. 2x war robuster (nie ein Abschnitt unter −13 %).
 # Achtung: Die Beobachtungsliste besteht aus heute bekannten Werten – das schönt jeden Backtest (Überlebende).
 ZOCKER: dict = {
-    "zocker_strategy": "momentum",
+    # 25.11. (dein Wunsch): Die KI entscheidet frei – Ziel maximale Rendite, minimaler Verlust (siehe zocker_ki.py).
+    # Momentum-Rangliste und Nachrichten liefern ihr die Kandidaten; Stops/Grenzen bleiben als Sicherheitsnetz.
+    "zocker_strategy": "ki",
     "trading_mode": "leverage",
     "allow_short": False,
     "mom_positions": 6,             # gestreut: bis zu 6 Positionen (25.11.: mehr streuen, mehr auf Nachrichten verlassen)

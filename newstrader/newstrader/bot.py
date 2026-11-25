@@ -137,7 +137,7 @@ def collect(cfg: Config, analyst: NewsAnalyst, held: set[str] | None = None
     focus = set(held) | {b[0] for b in best + worst}
     zc = cfg.zocker()
     mom_cands: list[str] = []
-    if zc.zocker_strategy == "momentum":   # Zocker: Rangliste nach Kursstärke; die Besten brauchen Live-Kurse + Nachrichten
+    if zc.zocker_strategy in ("momentum", "ki"):   # Zocker: Rangliste nach Kursstärke; die Besten brauchen Live-Kurse + Nachrichten
         from . import momentum
         try:
             order = momentum.update(zc, {b[0]: b[1] for b in base if b[1] is not None})
@@ -372,7 +372,11 @@ def run_once(cfg: Config, broker: PaperBroker, analyst: NewsAnalyst) -> None:
     lrn = learning.learner()
     broker.cfg = learning.zocker_cfg(cfg)     # Zocker-Profil + Gelerntes (nur für den Zocker)
     broker.on_close = lrn.record
-    if broker.cfg.zocker_strategy == "momentum":
+    if broker.cfg.zocker_strategy == "ki":                   # KI entscheidet frei (Stops bleiben mechanisch)
+        from . import manager, momentum, zocker_ki
+        market = (manager._last_regime or manager.load_state().get("regime") or {}).get("text", "")
+        zocker_ki.run(broker, broker.cfg, snaps, analyst, momentum.load()["ranking"], market, lrn.s["log"][-6:][::-1])
+    elif broker.cfg.zocker_strategy == "momentum":
         from . import momentum
         momentum.start_checks(broker.cfg, analyst, set(broker.positions))   # Kauf-Gutachten im Hintergrund
         momentum.run(broker, broker.cfg, snaps)
@@ -523,7 +527,7 @@ def run_forever(cfg: Config, stop: threading.Event | None = None) -> None:
                 beat()
                 if WAKE.is_set():          # „Jetzt prüfen“ -> Durchlauf vorziehen
                     WAKE.clear()
-                    log.info("Prüfung angefordert – Durchlauf wird vorgezogen")
+                    log.info("Durchlauf wird vorgezogen (Prüfung angefordert oder KI-Entscheidung umsetzen)")
                     break
                 if time.time() - last_watch >= 60:   # dein echtes Depot: Alarme + Abendbericht
                     last_watch = time.time()

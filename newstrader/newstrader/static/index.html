@@ -502,8 +502,9 @@ button.busy { opacity: .75; cursor: progress; }
       <div class="tbl" id="positions"></div>
     </div>
   </section>
+  <section class="card hidden" id="kiCard" style="margin-top:14px"></section>
   <section class="card hidden" id="momCard" style="margin-top:14px">
-    <h2>Rangliste</h2>
+    <h2 id="momTitle">Rangliste</h2>
     <div class="hint" id="momHint"></div>
     <div id="momList" style="padding:6px 0 8px"></div>
   </section>
@@ -686,6 +687,7 @@ function render(s) {
   pcInitControls(s);
   renderZockerSettings(s);
   renderMomentum(s);
+  renderKI(s);
   renderSystem(s);
   renderLogBadge(s);
 }
@@ -1319,6 +1321,23 @@ $("sigSearch").addEventListener("input", () => STATE && renderSignals(STATE));
 
 // ---------- Einstellungen: Zocker + System ----------
 function renderZockerSettings(s) {
+  if (s.ki) {
+    const R = s.ki.rules;
+    $("zSettings").innerHTML = `<h2>Zocker-Strategie: KI entscheidet frei</h2>
+      <div class="hint">Vorgabe: maximale Rendite, minimaler Verlust. Spielgeld: echte Scheine, aber kein echtes Geld.</div>
+      <div class="tr-rep" style="margin:12px 16px 0">
+        <div><b>Entscheidung:</b> Alle ${R.every} Minuten (werktags ${R.hours[0]}–${R.hours[1]} Uhr) bekommt die KI (Gemini, sonst Claude) das
+          ganze Bild: Konto, Positionen mit Gewinn/Verlust und Stops, Kandidaten (stärkstes Momentum und beste Signale) mit Kurslage,
+          Nachrichten, Schlagzeilen und Zahlen-Terminen, Marktlage und die letzten Trades. Sie entscheidet frei: kaufen (Größe, Hebel),
+          verkaufen – auch um Geld für bessere Chancen frei zu machen – oder abwarten und Cash halten.</div>
+        <div><b>Sicherheitsnetz:</b> Stop vor jeder Knock-out-Schwelle (mechanisch, sofort), höchstens ${nf(0).format(R.max_weight * 100)} % des
+          Kontos je Position, Hebel höchstens ${nf(0).format(R.max_leverage)}, höchstens ${R.max_positions} Positionen, nur bei Trade Republic
+          handelbare Produkte. Ist keine KI erreichbar, wird nichts Neues gekauft.</div>
+      </div>
+      <div class="name" style="padding:10px 16px 16px;line-height:1.5">Ob eine KI so dauerhaft Gewinn macht, ist unbewiesen – jede Runde wird mit
+        Begründung gespeichert (Zocker → Übersicht → „Entscheidung der KI“), damit man es nachvollziehen und messen kann.</div>`;
+    return;
+  }
   const M = s.momentum;
   if (!M) { $("zSettings").innerHTML = `<h2>Zocker</h2><div class="empty">Signal-Strategie (alt)</div>`; return; }
   const R = M.rules;
@@ -1348,6 +1367,30 @@ function renderZockerSettings(s) {
       5x brachte +2060 %, fiel zwischendurch aber bis −90 % und endete in 44 % der Nachbar-Einstellungen im Totalverlust.
       2x war am stabilsten, 10x ging in jeder Einstellung pleite. Die Zahlen sind geschönt, weil die Beobachtungsliste nur heute
       bekannte Werte enthält – eine Garantie ist das nicht.</div>`;
+}
+
+function renderKI(s) {
+  const K = s.ki;
+  $("kiCard").classList.toggle("hidden", !K);
+  if (!K) return;
+  const L = K.last, eq = s.summary?.equity || 0, cash = s.summary?.cash || 0;
+  const act = (a) => `<div class="mrow"><span class="mrank">${a.action === "buy" ? "▲" : "▼"}</span>
+      <div class="mname"><b>${a.action === "buy" ? "Kaufen" : "Verkaufen"} ${esc(a.symbol)}</b>
+        ${a.action === "buy" ? `<span class="name"> · ${nf(0).format(a.weight * 100)} % des Kontos · Hebel ${nf(0).format(a.leverage)}</span>` : ""}
+        <div class="mcheck">${esc(a.reason)}</div></div>
+      <span class="mtag ${/gekauft|verkauft/.test(a.status) ? "kaufen" : ""}">${esc(a.status)}</span><span></span></div>`;
+  const hist = (K.history || []).slice(1).map((r) => `<div class="cmp-row"><div style="min-width:0"><span class="name">${dt(r.time)} · ${esc(r.provider || "–")}</span>
+      <div style="font-size:12.5px">${esc(r.summary || "")}</div>
+      ${(r.actions || []).map((a) => `<div class="name">${a.action === "buy" ? "▲" : "▼"} ${esc(a.symbol)}: ${esc(a.status)}</div>`).join("")}</div></div>`).join("");
+  $("kiCard").innerHTML = `<div class="todo-head"><h2>🧠 Entscheidung der KI</h2>
+      <span class="name">${K.thinking ? "denkt gerade nach …" : K.next ? "nächste Runde " + new Date(K.next).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) + " Uhr" : ""}</span></div>
+    <div class="hint">Vorgabe: maximale Rendite, minimaler Verlust. Die KI entscheidet frei alle ${K.rules.every} Minuten (werktags ${K.rules.hours[0]}–${K.rules.hours[1]} Uhr) – Stops laufen immer mechanisch.</div>
+    ${L ? `<div style="padding:10px 16px 4px">
+        <div class="name">${dt(L.time)} · ${esc(L.provider || "keine KI erreichbar")}${L.cash_target != null && L.provider ? ` · Cash-Ziel ${nf(0).format(L.cash_target * 100)} % (jetzt ${eq ? nf(0).format(cash / eq * 100) : "–"} %)` : ""}</div>
+        <div class="tr-rep" style="margin:6px 0">${esc(L.summary || "")}</div></div>
+      <div style="padding:0 0 8px">${(L.actions || []).length ? L.actions.map(act).join("") : `<div class="name" style="padding:0 16px 8px">Keine Aktion – alles bleibt, wie es ist.</div>`}</div>`
+      : `<div class="empty">Die erste Entscheidung kommt im nächsten Durchlauf (werktags ${K.rules.hours[0]}–${K.rules.hours[1]} Uhr).</div>`}
+    ${hist ? `<details style="padding:0 16px 12px"><summary class="name" style="cursor:pointer">Frühere Runden</summary>${hist}</details>` : ""}`;
 }
 
 function renderMomentum(s) {
@@ -1381,7 +1424,8 @@ function renderMomentum(s) {
     <div class="name" style="padding:6px 16px 0">${F.n ? `Nach mind. 5 Tagen: ${F.n} übersprungene Werte im Schnitt ${signed(F.avg * 100, 1)} % –
       ${F.avg < 0 ? "der Filter hat Verluste vermieden." : "der Filter hat eher Gewinne gekostet."}` : "Aussagekräftig wird das nach ein paar Tagen."}</div>` : "";
   $("momList").innerHTML = (rows || `<div class="empty">Rangliste wird beim nächsten Durchlauf berechnet.</div>`) + vet;
-  $("momHint").textContent = `Die ${R.pool} stärksten nach Kursveränderung (6 Monate ohne letzte Woche, ${M.n} Werte mit positivem Trend). `
+  $("momTitle").textContent = s.ki ? "Kandidaten: stärkstes Momentum" : "Rangliste";
+  $("momHint").textContent = s.ki ? `Daraus (und aus den besten aktuellen Signalen) wählt die KI. Kursveränderung der letzten 6 Monate ohne letzte Woche · ${M.n} Werte mit positivem Trend.` : `Die ${R.pool} stärksten nach Kursveränderung (6 Monate ohne letzte Woche, ${M.n} Werte mit positivem Trend). `
     + `Gekauft wird nach Wertung: ${nf(0).format(R.news_weight * 100)} % Nachrichten, ${nf(0).format((1 - R.news_weight) * 100)} % Momentum`
     + (R.paused ? ` · 🕒 Kaufpause bis ${R.pause.split("-")[1]} Uhr` : "")
     + (M.checking ? " · KI prüft gerade Kandidaten …" : "")

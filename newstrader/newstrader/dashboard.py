@@ -121,7 +121,8 @@ def build_state(cfg: Config, in_process: bool) -> dict:
                   "products": [zc.product_min_leverage, zc.product_target_leverage, zc.product_max_leverage]
                   if getattr(zc, "real_products", False) else None},
         "version": _version(), "log_errors": logbuf.error_times(), "learning": learning.learner().summary(zc),
-        "momentum": momentum.view(zc, set(pf["positions"]) if pf else set()) if zc.zocker_strategy == "momentum" else None,
+        "momentum": momentum.view(zc, set(pf["positions"]) if pf else set()) if zc.zocker_strategy in ("momentum", "ki") else None,
+        "ki": __import__("newstrader.zocker_ki", fromlist=["view"]).view() if zc.zocker_strategy == "ki" else None,
     }
 
 
