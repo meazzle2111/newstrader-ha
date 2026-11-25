@@ -262,6 +262,34 @@ def valuation_history(txns: list[Txn], prices: dict[str, pd.Series], end: date |
     return pd.DataFrame({"value": value, "flow": flow, "ret": ret, "index": idx})
 
 
+def position_values_by_day(txns: list[Txn], prices: dict[str, pd.Series], end: date | None = None) -> pd.DataFrame:
+    """Wert je Position und Tag (Stück × Schlusskurs in €) – Spalten = Symbole, wie in valuation_history bewertet."""
+    real = [t for t in txns]
+    if not real:
+        return pd.DataFrame()
+    start = pd.Timestamp(min(t.date for t in real))
+    days = pd.bdate_range(start, pd.Timestamp(end or datetime.now(BERLIN).date()))
+    if len(days) == 0:
+        days = pd.DatetimeIndex([start])
+    qty = quantities_by_day(real, days)
+    px = pd.DataFrame(index=days)
+    for sym in qty.columns:
+        s = prices.get(sym)
+        if s is None or s.empty:
+            px[sym] = np.nan
+            continue
+        s = s.copy()
+        s.index = pd.DatetimeIndex(s.index).tz_localize(None).normalize()
+        s = s[~s.index.duplicated(keep="last")].sort_index()
+        px[sym] = s.reindex(days.union(s.index)).ffill().reindex(days)
+    for t in sorted(real, key=sort_key):
+        if t.type == "buy" and t.symbol in px:
+            mask = (px.index >= pd.Timestamp(t.date)) & px[t.symbol].isna()
+            px.loc[mask, t.symbol] = t.price
+    px = px.ffill().fillna(0.0)
+    return qty * px[qty.columns]
+
+
 def benchmark_index(series: pd.Series, days: pd.DatetimeIndex) -> pd.Series:
     """Vergleichsindex auf dieselben Tage legen, Start = 1."""
     s = series.copy()

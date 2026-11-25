@@ -4,7 +4,9 @@ function createPortfolioView(opts) {
   "use strict";
   const P = opts.prefix, API = opts.api, MODE = opts.mode;
   const PF = { ov: null, perf: null, risk: null, tx: null, alerts: null, range: "Max", allocKey: "symbol", busy: false, loadedOnce: false,
-               vRange: "1T", values: null };
+               vRange: "1T", values: null, multi: false, multiMode: "eur", multiData: null, posRange: "1M", posData: {} };
+  try { PF.multi = localStorage.getItem("nt-multi") === "1"; PF.multiMode = localStorage.getItem("nt-multi-mode") || "eur";
+        PF.posRange = localStorage.getItem("nt-pos-range") || "1M"; } catch (e) {}
   const MONTHS = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
   const ALLOC = { symbol: "Positionen", sector: "Branche", country: "Land", currency: "Währung" };
   // Jede Aktion: gedrückter Knopf zeigt „läuft …“ und ist gesperrt, danach kurze Meldung (Erfolg oder Fehler).
@@ -693,7 +695,8 @@ function createPortfolioView(opts) {
     set("Kpi", kpis());
     set("AllocBox", allocCard()); bindAlloc();
     set("Actions", actionsCard()); bindActions();
-    if (full || !PF.values) loadValues(); else drawValue();
+    // Live-Ansichten (letzte Stunde, Multigraph heute) bei jeder Aktualisierung neu laden
+    if (full || !PF.values || PF.vRange === "1h" || (PF.multi && PF.vRange === "1T")) loadValues(); else drawValue();
     if (full) {
       set("Perf", perfCard()); bindRange();
       set("Monthly", monthlyCard());
@@ -812,6 +815,8 @@ function createPortfolioView(opts) {
           <div class="kv"><span>Branche · Land</span><b>${esc(p.sector || "–")} · ${esc(p.country || "–")}</b></div>
           <div class="kv"><span>Bot-Signal</span>${p.signal == null ? "<b>–</b>" : scoreCell(p.signal, true, true, rules)}</div>
           ${p.signal_summary ? `<div class="reason" style="max-width:none;margin-top:6px">${esc(p.signal_summary)}</div>` : ""}
+          <div class="pos-chart"><div class="seg">${POS_RANGES.map((r) => `<button data-pr="${r}" class="${r === PF.posRange ? "on" : ""}">${r}</button>`).join("")}</div>
+            <div class="pc-mini" id="${pcId(p.symbol)}"></div></div>
         </div>` : ""}</div>`;
     };
     const cashRow = k.cash != null ? `<div class="pos cash"><div class="pos-row"><div class="pos-l"><div class="pos-name">Cash</div>
@@ -826,15 +831,25 @@ function createPortfolioView(opts) {
       openPos.has(sym) ? openPos.delete(sym) : openPos.add(sym);
       set("Pos", positionList()); bindPositionList();
     });
+    root().querySelectorAll(".pos-chart [data-pr]").forEach((b) => b.onclick = (ev) => {
+      ev.stopPropagation();
+      PF.posRange = b.dataset.pr;
+      try { localStorage.setItem("nt-pos-range", PF.posRange); } catch (e) {}
+      root().querySelectorAll(".pos-chart [data-pr]").forEach((x) => x.classList.toggle("on", x.dataset.pr === PF.posRange));
+      openPos.forEach((sym) => { drawPosChart(sym); loadPosChart(sym); });
+    });
+    openPos.forEach((sym) => { drawPosChart(sym); loadPosChart(sym); });
   }
 
   // ------------------------------------------------------------------ Wertverlauf (oben)
-  const VRANGES = ["1T", "1W", "1M", "3M", "YTD", "1J", "Max"];
+  const VRANGES = ["1h", "1T", "1W", "1M", "3M", "YTD", "1J", "Max"];
   async function loadValues() {
     const want = PF.vRange;
-    const v = await GET(`api/pf/values?range=${encodeURIComponent(want)}`);
+    const [v, mg] = await Promise.all([GET(`api/pf/values?range=${encodeURIComponent(want)}`),
+      PF.multi ? GET(`api/pf/multi?range=${encodeURIComponent(want)}`) : Promise.resolve(null)]);
     if (want !== PF.vRange) return;
     PF.values = v && !v.error ? v : { points: [], change: {} };
+    if (PF.multi) PF.multiData = mg && !mg.error ? mg : { t: [], series: {}, cash: [], names: {} };
     drawValue();
   }
   function checkStatus() {
@@ -869,7 +884,7 @@ function createPortfolioView(opts) {
       ch = { abs, pct: pts[0].v ? abs / pts[0].v : null };
     }
     const up = (ch.abs ?? 0) >= 0;
-    const label = { "1T": "heute", "1W": "1 Woche", "1M": "1 Monat", "3M": "3 Monate", YTD: "seit Jahresbeginn", "1J": "1 Jahr", Max: "seit Start" }[PF.vRange];
+    const label = { "1h": "letzte Stunde", "1T": "heute", "1W": "1 Woche", "1M": "1 Monat", "3M": "3 Monate", YTD: "seit Jahresbeginn", "1J": "1 Jahr", Max: "seit Start" }[PF.vRange];
     el.innerHTML = `<section class="card" style="margin-bottom:14px;padding:16px 16px 10px">
         <div class="label name" style="font-size:12.5px">Portfoliowert</div>
         <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
@@ -882,10 +897,20 @@ function createPortfolioView(opts) {
           <div class="splitlbl"><span><i class="inv"></i>Investiert <b>${eur(k.securities)}</b> · ${pct(k.securities / k.total, 0, false)}</span>
             <span><i class="csh"></i>Cash <b>${eur(k.cash)}</b> · ${pct(k.cash / k.total, 0, false)}</span></div>` : ""}
         <div class="chart-box" id="${P}VBox" style="padding:6px 0 0"><div class="tooltip" id="${P}VTip"></div></div>
-        <div class="value-foot"><div class="seg">${VRANGES.map((r) => `<button data-vr="${r}" class="${r === PF.vRange ? "on" : ""}">${r}</button>`).join("")}</div>
+        <div class="value-foot"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <div class="seg">${VRANGES.map((r) => `<button data-vr="${r}" class="${r === PF.vRange ? "on" : ""}">${r}</button>`).join("")}</div>
+            <button class="btn ghost sm toggle${PF.multi ? " on" : ""}" id="${P}Multi" aria-pressed="${PF.multi}" title="Verlauf jeder Position im Verhältnis zum Gesamtwert">Multigraph</button>
+            ${PF.multi ? `<div class="seg" id="${P}MMode"><button data-mm="eur" class="${PF.multiMode === "eur" ? "on" : ""}">€</button><button data-mm="pct" class="${PF.multiMode === "pct" ? "on" : ""}">%</button></div>` : ""}</div>
           <div class="check">${checkStatus()}${btn(PF.state?.check?.running ? "Prüfe …" : "⟳ Jetzt prüfen", `id="${P}Check" ${PF.state?.check?.running ? "disabled" : ""}`, true)}</div></div>
       </section>`;
-    el.querySelectorAll("[data-vr]").forEach((b) => b.onclick = () => { PF.vRange = b.dataset.vr; PF.values = null; drawValue(); loadValues(); });
+    el.querySelectorAll("[data-vr]").forEach((b) => b.onclick = () => { PF.vRange = b.dataset.vr; PF.values = null; PF.multiData = null; drawValue(); loadValues(); });
+    document.getElementById(P + "Multi").onclick = () => {
+      PF.multi = !PF.multi; PF.multiData = null;
+      try { localStorage.setItem("nt-multi", PF.multi ? "1" : "0"); } catch (e) {}
+      drawValue(); if (PF.multi) loadValues();
+    };
+    el.querySelectorAll("[data-mm]").forEach((b) => b.onclick = () => {
+      PF.multiMode = b.dataset.mm; try { localStorage.setItem("nt-multi-mode", PF.multiMode); } catch (e) {} drawValue(); });
     const cb = document.getElementById(P + "Check");
     if (cb) cb.onclick = async () => {
       const r = await POST("api/pf/check", {});
@@ -893,9 +918,10 @@ function createPortfolioView(opts) {
       PF.state.check = r.data.check; drawValue(); pollCheck();
     };
     const box = document.getElementById(P + "VBox");
+    if (PF.multi) { drawMulti(box); return; }
     if (!PF.values) { box.insertAdjacentHTML("beforeend", `<div class="empty" style="padding:50px 0">Lade …</div>`); return; }
     if (pts.length < 2) {
-      box.insertAdjacentHTML("beforeend", `<div class="empty" style="padding:50px 0">${PF.values.intraday ? "Der Tagesverlauf wird ab jetzt alle 5 Minuten aufgezeichnet – gleich geht's los." : "Der Verlauf erscheint ab dem zweiten Tag."}</div>`);
+      box.insertAdjacentHTML("beforeend", `<div class="empty" style="padding:50px 0">${PF.values.intraday ? "Der Verlauf wird jede Minute aufgezeichnet – gleich geht's los." : "Der Verlauf erscheint ab dem zweiten Tag."}</div>`);
       return;
     }
     const W = Math.max(280, box.clientWidth), H = box.clientWidth < 500 ? 170 : 220, m = { l: 4, r: 64, t: 10, b: 22 };
@@ -910,7 +936,7 @@ function createPortfolioView(opts) {
     const area = `${line} L${x(t1).toFixed(1)},${H - m.b} L${x(t0).toFixed(1)},${H - m.b} Z`;
     const col = cssVar("--series-1");
     const fmtX = (t) => { const d = new Date(t);
-      if (PF.vRange === "1T") return d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+      if (PF.vRange === "1T" || PF.vRange === "1h") return d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
       if (PF.vRange === "1W") return d.toLocaleDateString("de-DE", { weekday: "short" });
       if (PF.vRange === "1J" || PF.vRange === "Max" && t1 - t0 > 200 * 864e5) return d.toLocaleDateString("de-DE", { month: "short", year: "2-digit" });
       return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }); };
@@ -947,6 +973,152 @@ function createPortfolioView(opts) {
     hit.addEventListener("touchmove", (ev) => { show(ev.touches[0].clientX); ev.preventDefault(); }, { passive: false });
     const hide = () => { tip.style.display = "none"; vx.setAttribute("visibility", "hidden"); vd.setAttribute("visibility", "hidden"); };
     hit.addEventListener("mouseleave", hide); hit.addEventListener("touchend", hide);
+  }
+
+  // ------------------------------------------------------------------ Multigraph: Positionen übereinander = Portfoliowert
+  const CAT = () => Array.from({ length: 8 }, (_, i) => cssVar(`--cat-${i + 1}`));
+  const tOf = (t) => new Date(t.length > 10 ? t : t + "T17:30:00").getTime();
+  function fmtAxis(t, t0, t1) {
+    const d = new Date(t);
+    if (["1h", "1T"].includes(PF.vRange)) return d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    if (PF.vRange === "1W") return d.toLocaleDateString("de-DE", { weekday: "short" });
+    if (PF.vRange === "1J" || (PF.vRange === "Max" && t1 - t0 > 200 * 864e5)) return d.toLocaleDateString("de-DE", { month: "short", year: "2-digit" });
+    return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+  }
+  function drawMulti(box) {
+    const d = PF.multiData;
+    if (!d) { box.insertAdjacentHTML("beforeend", `<div class="empty" style="padding:50px 0">Lade …</div>`); return; }
+    if ((d.t || []).length < 2) {
+      box.insertAdjacentHTML("beforeend", `<div class="empty" style="padding:50px 0">${d.intraday
+        ? "Der Verlauf je Position wird seit dem Update jede Minute aufgezeichnet – bald zu sehen. Längere Zeiträume (1M, 3M …) gehen sofort."
+        : "Noch zu wenige Tage für einen Verlauf."}</div>`);
+      return;
+    }
+    const n = d.t.length, last = (a) => a[n - 1] || 0;
+    const syms = Object.keys(d.series).sort((a, b) => last(d.series[b]) - last(d.series[a]));
+    const pal = CAT(), top = syms.slice(0, 7), rest = syms.slice(7);
+    const layers = top.map((s, i) => ({ key: s, label: d.names[s] || s, color: pal[i], vals: d.series[s] }));
+    if (rest.length) layers.push({ key: "_rest", label: `Weitere ${rest.length}`, color: cssVar("--axis"),
+      vals: d.t.map((_, j) => rest.reduce((a, s) => a + (d.series[s][j] || 0), 0)) });
+    layers.push({ key: "_cash", label: "Cash", color: cssVar("--grid"), vals: d.cash });
+    const tot = d.t.map((_, j) => layers.reduce((a, L) => a + (L.vals[j] || 0), 0));
+    const pctMode = PF.multiMode === "pct";
+    const val = (L, j) => pctMode ? (tot[j] ? (L.vals[j] || 0) / tot[j] : 0) : (L.vals[j] || 0);
+    const T = d.t.map(tOf), t0 = T[0], t1 = T[n - 1];
+    const W = Math.max(280, box.clientWidth), H = box.clientWidth < 500 ? 200 : 250, m = { l: 4, r: 64, t: 10, b: 22 };
+    const hi = pctMode ? 1 : Math.max(...tot) * 1.05;
+    const ticks = pctMode ? [0, 0.25, 0.5, 0.75, 1] : niceTicks(0, hi, 4).filter((v) => v <= hi);
+    const x = (t) => m.l + (t - t0) / Math.max(1, t1 - t0) * (W - m.l - m.r);
+    const y = (v) => m.t + (hi - v) / hi * (H - m.t - m.b);
+    // von unten nach oben stapeln: größte Position unten, Cash oben
+    const base = new Array(n).fill(0), paths = [];
+    for (const L of layers) {
+      const top_ = base.map((b, j) => b + val(L, j));
+      const up = T.map((t, j) => `${j ? "L" : "M"}${x(t).toFixed(1)},${y(top_[j]).toFixed(1)}`).join("");
+      const down = T.map((t, j) => `L${x(T[n - 1 - j]).toFixed(1)},${y(base[n - 1 - j]).toFixed(1)}`).join("");
+      paths.push(`<path d="${up}${down}Z" fill="${L.color}" fill-opacity="${L.key === "_cash" ? 0.9 : 0.85}" stroke="${cssVar("--surface")}" stroke-width="1"/>`);
+      top_.forEach((v, j) => { base[j] = v; });
+    }
+    const nX = Math.min(5, n), xs = Array.from({ length: nX }, (_, i) => t0 + (t1 - t0) * i / Math.max(1, nX - 1));
+    box.insertAdjacentHTML("afterbegin", `<div class="mg-legend">${layers.map((L) => `<span><i style="background:${L.color}"></i>${esc(L.label)}</span>`).join("")}</div>`);
+    box.insertAdjacentHTML("beforeend", `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Wert jeder Position übereinander, oben der Portfoliowert">
+      ${paths.join("")}
+      ${ticks.map((v) => `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="${cssVar("--surface")}" stroke-opacity="0.35"/><text x="${W - m.r + 8}" y="${y(v) + 4}">${pctMode ? nf(0).format(v * 100) + " %" : nf(0).format(v) + " €"}</text>`).join("")}
+      ${xs.map((t, i) => `<text x="${x(t)}" y="${H - 5}" text-anchor="${i === 0 ? "start" : i === nX - 1 ? "end" : "middle"}">${fmtAxis(t, t0, t1)}</text>`).join("")}
+      <line id="${P}MX" y1="${m.t}" y2="${H - m.b}" stroke="${cssVar("--ink")}" stroke-width="1" visibility="hidden"/>
+      <rect id="${P}MHit" x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/></svg>`);
+    const hit = document.getElementById(P + "MHit"), tip = document.getElementById(P + "VTip"), vx = document.getElementById(P + "MX");
+    const colorOf = Object.fromEntries(top.map((s, i) => [s, pal[i]]));
+    const show = (clientX) => {
+      const r = hit.getBoundingClientRect(), tx = t0 + (clientX - r.left) / r.width * (t1 - t0);
+      let i = 0; for (let j = 0; j < n; j++) if (Math.abs(T[j] - tx) < Math.abs(T[i] - tx)) i = j;
+      vx.setAttribute("x1", x(T[i])); vx.setAttribute("x2", x(T[i])); vx.setAttribute("visibility", "visible");
+      const rows = syms.map((s) => [s, d.series[s][i] || 0]).filter((r_) => r_[1] > 0).sort((a, b) => b[1] - a[1]);
+      const dd = new Date(T[i]);
+      tip.innerHTML = `<div class="t">${d.intraday ? dd.toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" }) : dd.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" })} · ${eur(tot[i], 2)}</div>
+        ${rows.map(([s, v]) => `<div class="row mg"><i class="dot" style="background:${colorOf[s] || cssVar("--axis")}"></i><span>${esc(d.names[s] || s)}</span><b>${eur(v)}</b><span class="name">${pct(tot[i] ? v / tot[i] : 0, 1, false)}</span></div>`).join("")}
+        <div class="row mg"><i class="dot" style="background:${cssVar("--grid")}"></i><span>Cash</span><b>${eur(d.cash[i] || 0)}</b><span class="name">${pct(tot[i] ? (d.cash[i] || 0) / tot[i] : 0, 1, false)}</span></div>`;
+      tip.style.display = "block";
+      const bx = box.getBoundingClientRect();
+      let left = x(T[i]) + 12; if (left + tip.offsetWidth > bx.width) left = x(T[i]) - tip.offsetWidth - 12;
+      tip.style.left = Math.max(0, left) + "px"; tip.style.top = "6px";
+    };
+    hit.addEventListener("mousemove", (ev) => show(ev.clientX));
+    hit.addEventListener("touchmove", (ev) => { show(ev.touches[0].clientX); ev.preventDefault(); }, { passive: false });
+    const hide = () => { tip.style.display = "none"; vx.setAttribute("visibility", "hidden"); };
+    hit.addEventListener("mouseleave", hide); hit.addEventListener("touchend", hide);
+  }
+
+  // ------------------------------------------------------------------ Kurs-Chart einer Position (aufgeklappt)
+  const POS_RANGES = ["1h", "1T", "1W", "1M", "3M", "1J", "Max"];
+  const pcId = (sym) => P + "PC-" + sym.replace(/[^A-Za-z0-9]/g, "_");
+  async function loadPosChart(sym, force) {
+    const key = `${sym}|${PF.posRange}`, hit_ = PF.posData[key];
+    const maxAge = ["1h", "1T"].includes(PF.posRange) ? 30e3 : 5 * 60e3;
+    if (hit_ && !force && Date.now() - hit_.at < maxAge) { drawPosChart(sym); return; }
+    const rng = PF.posRange;
+    const d = await GET(`api/pf/chart?symbol=${encodeURIComponent(sym)}&range=${encodeURIComponent(rng)}`);
+    PF.posData[`${sym}|${rng}`] = { at: Date.now(), data: d && !d.error ? d : { prices: [], trades: [] } };
+    if (rng === PF.posRange) drawPosChart(sym);
+  }
+  function drawPosChart(sym) {
+    const box = document.getElementById(pcId(sym));
+    if (!box) return;
+    const d = PF.posData[`${sym}|${PF.posRange}`]?.data;
+    if (!d) { box.innerHTML = `<div class="empty" style="padding:50px 0">Lade Kursverlauf …</div>`; return; }
+    const pts = (d.prices || []).filter((p) => p[1] != null);
+    if (pts.length < 2) { box.innerHTML = `<div class="empty" style="padding:50px 0">Für diesen Zeitraum gibt es keine Kurse${["1h", "1T"].includes(PF.posRange) ? " (Börse heute noch zu?)" : ""}.</div>`; return; }
+    const T = pts.map((p) => tOf(p[0])), t0 = T[0], t1 = T[T.length - 1];
+    const W = Math.max(260, box.clientWidth), H = 160, m = { l: 4, r: 58, t: 10, b: 20 };
+    const intra = ["1h", "1T"].includes(PF.posRange);
+    const marks = intra ? [] : (d.trades || []).map((t) => ({ ...t, ts: tOf(t.date) })).filter((t) => t.ts >= t0 - 864e5 && t.ts <= t1 + 864e5);
+    const vals = pts.map((p) => p[1]).concat(d.avg_price ? [d.avg_price] : [], marks.map((t) => t.price));
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    const pad = Math.max((hi - lo) * 0.1, hi * 0.003); lo -= pad; hi += pad;
+    const x = (t) => m.l + (t - t0) / Math.max(1, t1 - t0) * (W - m.l - m.r);
+    const y = (v) => m.t + (hi - v) / (hi - lo) * (H - m.t - m.b);
+    const first = pts[0][1], lastP = pts[pts.length - 1][1], chg = lastP / first - 1;
+    const col = cssVar("--series-1");
+    const line = pts.map((p, i) => `${i ? "L" : "M"}${x(T[i]).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
+    const ticks = niceTicks(lo, hi, 3).filter((v) => v >= lo && v <= hi);
+    const nX = 3, xs = Array.from({ length: nX }, (_, i) => t0 + (t1 - t0) * i / (nX - 1));
+    const fx = (t) => { const dd = new Date(t);
+      return intra ? dd.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })
+        : PF.posRange === "1W" ? dd.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit" })
+        : dd.toLocaleDateString("de-DE", ["1J", "Max"].includes(PF.posRange) ? { month: "short", year: "2-digit" } : { day: "2-digit", month: "2-digit" }); };
+    box.innerHTML = `<div class="name" style="padding:2px 0 4px">${PF.posRange === "1h" ? "Letzte Stunde" : PF.posRange === "1T" ? "Heute" : "Im Zeitraum"}:
+        <b class="${cls(chg)}">${pct(chg, 2)}</b>${d.avg_price ? ` · Einstand ${nf(2).format(d.avg_price)} € (gestrichelt)` : ""}${marks.length ? " · ▲ Kauf ▼ Verkauf" : ""}</div>
+      <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Kursverlauf ${esc(d.name || sym)}">
+      ${ticks.map((v) => `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="${cssVar("--grid")}"/><text x="${W - m.r + 6}" y="${y(v) + 4}">${nf(v < 10 ? 2 : 0).format(v)} €</text>`).join("")}
+      ${d.avg_price && d.avg_price >= lo && d.avg_price <= hi ? `<line x1="${m.l}" x2="${W - m.r}" y1="${y(d.avg_price)}" y2="${y(d.avg_price)}" stroke="${cssVar("--muted")}" stroke-dasharray="4 4"/>` : ""}
+      <path d="${line}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${marks.map((t) => { const cx = Math.min(Math.max(x(t.ts), m.l), W - m.r), cy = y(t.price);
+        return t.side === "buy" ? `<path d="M${cx},${cy - 6} l5,9 h-10 Z" fill="${cssVar("--good-text")}" stroke="${cssVar("--surface")}" stroke-width="1.5"><title>Kauf ${nf(4).format(t.qty).replace(/,?0+$/, "")} Stk zu ${nf(2).format(t.price)} € am ${new Date(t.date).toLocaleDateString("de-DE")}</title></path>`
+          : `<path d="M${cx},${cy + 6} l5,-9 h-10 Z" fill="${cssVar("--bad-text")}" stroke="${cssVar("--surface")}" stroke-width="1.5"><title>Verkauf ${nf(4).format(t.qty).replace(/,?0+$/, "")} Stk zu ${nf(2).format(t.price)} € am ${new Date(t.date).toLocaleDateString("de-DE")}</title></path>`; }).join("")}
+      <circle cx="${x(t1)}" cy="${y(lastP)}" r="3.5" fill="${col}" stroke="${cssVar("--surface")}" stroke-width="2"/>
+      ${xs.map((t, i) => `<text x="${x(t)}" y="${H - 4}" text-anchor="${i === 0 ? "start" : i === nX - 1 ? "end" : "middle"}">${fx(t)}</text>`).join("")}
+      <line class="pcx" y1="${m.t}" y2="${H - m.b}" stroke="${cssVar("--muted")}" stroke-dasharray="3 3" visibility="hidden"/>
+      <circle class="pcd" r="4" fill="${col}" stroke="${cssVar("--surface")}" stroke-width="2" visibility="hidden"/>
+      <rect class="pch" x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/></svg>
+      <div class="tooltip"></div>`;
+    const hitR = box.querySelector(".pch"), tip = box.querySelector(".tooltip"), vx = box.querySelector(".pcx"), vd = box.querySelector(".pcd");
+    const show = (clientX) => {
+      const r = hitR.getBoundingClientRect(), tx = t0 + (clientX - r.left) / r.width * (t1 - t0);
+      let i = 0; for (let j = 0; j < T.length; j++) if (Math.abs(T[j] - tx) < Math.abs(T[i] - tx)) i = j;
+      vx.setAttribute("x1", x(T[i])); vx.setAttribute("x2", x(T[i])); vx.setAttribute("visibility", "visible");
+      vd.setAttribute("cx", x(T[i])); vd.setAttribute("cy", y(pts[i][1])); vd.setAttribute("visibility", "visible");
+      const dd = new Date(T[i]), p_ = pts[i][1];
+      tip.innerHTML = `<div class="t">${pts[i][0].length > 10 ? dd.toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : dd.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" })}</div>
+        <div class="row"><span>Kurs</span><b>${nf(2).format(p_)} €</b></div>
+        ${d.avg_price ? `<div class="row"><span>zum Einstand</span><b class="${cls(p_ - d.avg_price)}">${pct(p_ / d.avg_price - 1, 1)}</b></div>` : ""}`;
+      tip.style.display = "block";
+      let left = x(T[i]) + 12; if (left + tip.offsetWidth > W) left = x(T[i]) - tip.offsetWidth - 12;
+      tip.style.left = Math.max(0, left) + "px"; tip.style.top = "24px";
+    };
+    hitR.addEventListener("mousemove", (ev) => show(ev.clientX));
+    hitR.addEventListener("touchmove", (ev) => { show(ev.touches[0].clientX); ev.preventDefault(); }, { passive: false });
+    const hide = () => { tip.style.display = "none"; vx.setAttribute("visibility", "hidden"); vd.setAttribute("visibility", "hidden"); };
+    hitR.addEventListener("mouseleave", hide); hitR.addEventListener("touchend", hide);
   }
 
   // ------------------------------------------------------------------ Kennzahlen

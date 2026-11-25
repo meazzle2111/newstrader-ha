@@ -222,34 +222,122 @@ def build_chart(cfg: Config, symbol: str, rng: str) -> dict:
             "bucket": BUCKET_SECONDS.get(rng), "live": live.as_json() if live else None}
 
 
-def _pf_values(cfg: Config, rng: str, state: dict) -> dict:
-    """Wertverlauf des Depots (inkl. Cash) für die Grafik oben: 1T/1W aus 5-Min.-Aufzeichnung, sonst Tageswerte."""
+INTRADAY = ("1h", "1T", "1W")
+
+
+def _intraday_window(rows: list, rng: str, t_of) -> list:
+    """1h: die letzte Stunde mit Daten · 1T: der letzte Tag mit Daten (deutsche Zeit) · 1W: 7 Tage im 15-Minuten-Raster."""
     from datetime import datetime, timedelta, timezone
-    from . import manager, portfolio as pf, portfolio_service as ps
-    now = datetime.now(timezone.utc)
-    if rng in ("1T", "1W"):
-        raw = manager.load_values()
-        if rng == "1T":
-            # aktueller Tag nach deutscher Zeit; am Wochenende/vor dem ersten Punkt der letzte Tag mit Daten
-            local = lambda t: datetime.fromisoformat(t).astimezone(pf.BERLIN).date().isoformat()  # noqa: E731
-            days = sorted({local(r[0]) for r in raw})
-            day = days[-1] if days else now.astimezone(pf.BERLIN).date().isoformat()
-            pts = [{"t": t, "v": v} for t, v in raw if local(t) == day]
+    from . import portfolio as pf
+    if not rows:
+        return []
+    if rng == "1h":
+        last = datetime.fromisoformat(t_of(rows[-1]))
+        cut = (last - timedelta(minutes=60)).isoformat()
+        return [r for r in rows if t_of(r) >= cut]
+    if rng == "1T":
+        local = lambda t: datetime.fromisoformat(t).astimezone(pf.BERLIN).date().isoformat()  # noqa: E731
+        day = local(t_of(rows[-1]))
+        return [r for r in rows if local(t_of(r)) == day]
+    cut = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    out, last = [], None
+    for r in rows:
+        if t_of(r) < cut:
+            continue
+        b = int(datetime.fromisoformat(t_of(r)).timestamp()) // 900
+        if b != last:
+            out.append(r)
+            last = b
         else:
-            cut = (now - timedelta(days=7)).isoformat()
-            pts = [{"t": t, "v": v} for t, v in raw if t >= cut]
-            pts = pts[::3] + ([pts[-1]] if pts and len(pts) % 3 != 1 else [])  # 15-Minuten-Raster
+            out[-1] = r                     # je 15 Minuten der letzte Stand
+    return out
+
+
+def _daily_window(pts: list, rng: str, key=lambda p: p["t"]) -> list:
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    start = {"1M": now - timedelta(days=31), "3M": now - timedelta(days=92), "1J": now - timedelta(days=366),
+             "YTD": now.replace(month=1, day=1)}.get(rng)
+    if start is None:
+        return pts
+    day = start.date().isoformat()
+    before = [p for p in pts if key(p) < day]
+    return before[-1:] + [p for p in pts if key(p) >= day]
+
+
+def _pf_values(cfg: Config, rng: str, state: dict) -> dict:
+    """Wertverlauf des Depots (inkl. Cash) für die Grafik oben: 1h/1T/1W aus der Minuten-Aufzeichnung, sonst Tageswerte."""
+    from . import manager, portfolio as pf, portfolio_service as ps
+    if rng in INTRADAY:
+        pts = [{"t": t, "v": v} for t, v in _intraday_window(manager.load_values(), rng, lambda r: r[0])]
         return {"range": rng, "points": pts, "change": manager.period_change(pts, state), "intraday": True}
     perf = ps.performance(cfg, "model")
     txns = pf.load_txns("model")
     sec = {r["date"]: r["value"] for r in perf.get("series", [])}
-    pts = manager.daily_totals(state, txns, sec)
-    start = {"1M": now - timedelta(days=31), "3M": now - timedelta(days=92), "1J": now - timedelta(days=366),
-             "YTD": now.replace(month=1, day=1)}.get(rng)
-    if start is not None:
-        before = [p for p in pts if p["t"] < start.date().isoformat()]
-        pts = before[-1:] + [p for p in pts if p["t"] >= start.date().isoformat()]
+    pts = _daily_window(manager.daily_totals(state, txns, sec), rng)
     return {"range": rng, "points": pts, "change": manager.period_change(pts, state), "intraday": False}
+
+
+def _pf_multi(cfg: Config, rng: str, state: dict) -> dict:
+    """Multigraph: Wert jeder Position + Cash über die Zeit (übereinander = Portfoliowert)."""
+    from . import manager, portfolio as pf, portfolio_service as ps
+    if rng in INTRADAY:
+        rows = _intraday_window(manager.load_position_values(), rng, lambda r: r["t"])
+        syms = sorted({s for r in rows for s in r["p"]})
+        times = [r["t"] for r in rows]
+        series = {s: [r["p"].get(s, 0.0) for r in rows] for s in syms}
+        cash = [r["c"] for r in rows]
+        intraday = True
+    else:
+        txns = pf.load_txns("model")
+        if not txns:
+            return {"range": rng, "t": [], "series": {}, "cash": [], "names": {}, "intraday": False}
+        period = ps._period_for(min(t.date for t in txns))
+        syms_all = sorted({t.symbol for t in txns if t.type != "dividend"})
+        prices = {s: ps.history_eur(cfg, s, period) for s in syms_all}
+        vals = pf.position_values_by_day(txns, {s: p for s, p in prices.items() if p is not None})
+        perf = ps.performance(cfg, "model")
+        sec = {r["date"]: r["value"] for r in perf.get("series", [])}
+        totals = {p["t"]: p["v"] for p in manager.daily_totals(state, txns, sec)}
+        days = _daily_window([d.strftime("%Y-%m-%d") for d in vals.index], rng, key=lambda d: d)
+        vals = vals.loc[[d for d in vals.index if d.strftime("%Y-%m-%d") in set(days)]]
+        syms = [s for s in vals.columns if vals[s].abs().sum() > 0]
+        times = [d.strftime("%Y-%m-%d") for d in vals.index]
+        series = {s: [round(float(v), 2) for v in vals[s]] for s in syms}
+        cash = [round(max(0.0, (totals.get(t) or 0.0) - sum(series[s][i] for s in syms)), 2) for i, t in enumerate(times)]
+        intraday = False
+    return {"range": rng, "t": times, "series": series, "cash": cash, "intraday": intraday,
+            "names": {s: cfg.names.get(s, s) for s in series}}
+
+
+POS_RANGES = ("1h", "1T", "1W", "1M", "3M", "1J", "Max")
+
+
+def _pf_chart(cfg: Config, sym: str, rng: str) -> dict:
+    """Kursverlauf einer Position (in €) mit deinen Käufen/Verkäufen und dem Einstand."""
+    from datetime import datetime, timedelta
+    from . import portfolio as pf, portfolio_service as ps
+    txns = [t for t in pf.load_txns("model") if t.symbol == sym and t.type in ("buy", "sell")]
+    if rng in ("1h", "1T"):
+        prices = _price_series(cfg, sym, "1T")
+        if rng == "1h" and prices:
+            cut = (datetime.fromisoformat(prices[-1][0]) - timedelta(minutes=60)).isoformat()
+            prices = [p for p in prices if p[0] >= cut]
+    elif rng in ("1W", "1M"):
+        prices = _price_series(cfg, sym, "5T" if rng == "1W" else "1M")
+    else:
+        first = min((t.date for t in txns), default=None)
+        period = {"3M": "3mo", "1J": "1y"}.get(rng) or (ps._period_for(first) if first else "1y")
+        h = ps.history_eur(cfg, sym, period)
+        prices = [[d.strftime("%Y-%m-%d"), round(float(v), 4)] for d, v in h.items()] if h is not None else []
+        if rng == "Max" and first:
+            before = [p for p in prices if p[0] < first]
+            prices = before[-5:] + [p for p in prices if p[0] >= first]
+    hs = pf.compute_holdings(pf.load_txns("model")).get(sym)
+    return {"symbol": sym, "name": cfg.names.get(sym, sym), "range": rng, "prices": prices,
+            "avg_price": hs.avg_price if hs and hs.qty > 0 else None,
+            "trades": [{"date": t.date, "side": t.type, "qty": t.qty, "price": t.price} for t in txns],
+            "intraday": rng in ("1h", "1T", "1W", "1M")}
 
 
 class PriceCheckError(ValueError):
@@ -403,6 +491,16 @@ def make_handler(cfg: Config, in_process: bool):
             if path == "/api/pf/values":
                 rng = parse_qs(urlparse(self.path).query).get("range", ["1M"])[0]
                 return self._json(_pf_values(cfg, rng, state))
+            if path == "/api/pf/multi":
+                rng = parse_qs(urlparse(self.path).query).get("range", ["1M"])[0]
+                return self._json(_pf_multi(cfg, rng, state))
+            if path == "/api/pf/chart":
+                q = parse_qs(urlparse(self.path).query)
+                sym, rng = q.get("symbol", [""])[0], q.get("range", ["1M"])[0]
+                held = {t.symbol for t in pf.load_txns("model")}
+                if rng not in POS_RANGES or not (sym in held or _known_symbol(cfg, sym)):
+                    return self._json({"error": "unbekannter Wert oder Zeitraum"}, 400)
+                return self._json(_pf_chart(cfg, sym, rng))
             if path == "/api/pf/transactions":
                 from dataclasses import asdict
                 txns = sorted(pf.load_txns("model"), key=pf.sort_key, reverse=True)

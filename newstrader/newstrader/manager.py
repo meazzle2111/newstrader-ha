@@ -939,11 +939,33 @@ def _run_setup(cfg: Config, capital: float, style: str, notify) -> None:
 
 # --------------------------------------------------------------------------- Wertverlauf
 VALUES_FILE = STATE_DIR / "model_values.json"
+POS_VALUES_FILE = STATE_DIR / "model_values_pos.jsonl"   # je Minute: Cash + Wert jeder Position (Multigraph)
 _last_record = [0.0]
+_last_compact = [0.0]
 
 
-def record_value(cfg: Config, every_seconds: int = 300) -> float | None:
-    """Gesamtwert (Wertpapiere zu Live-Kursen + Cash) alle 5 Minuten aufzeichnen – für die 1T/1W-Grafik."""
+def _thin(rows: list, t_of, now: datetime, keep_days: float, older_minutes: int, max_days: float | None = None) -> list:
+    """Jüngste `keep_days` minutengenau behalten, Älteres auf ein Raster von `older_minutes` ausdünnen."""
+    cut = (now - timedelta(days=keep_days)).isoformat()
+    oldest = (now - timedelta(days=max_days)).isoformat() if max_days else ""
+    out, last = [], None
+    for r in rows:
+        t = t_of(r)
+        if t < oldest:
+            continue
+        if t >= cut:
+            out.append(r)
+            continue
+        b = int(datetime.fromisoformat(t).timestamp()) // (older_minutes * 60)
+        if b != last:
+            out.append(r)
+            last = b
+    return out
+
+
+def record_value(cfg: Config, every_seconds: int = 60) -> float | None:
+    """Gesamtwert (Wertpapiere zu Live-Kursen + Cash) jede Minute aufzeichnen – für die 1h/1T/1W-Grafik –
+    und dazu den Wert jeder Position (Multigraph). Ältere Punkte werden ausgedünnt."""
     import time as _t
     if _t.time() - _last_record[0] < every_seconds:
         return None
@@ -960,16 +982,43 @@ def record_value(cfg: Config, every_seconds: int = 300) -> float | None:
         return None
     total = round(ov["kpi"]["total"], 2)
     _last_record[0] = _t.time()
+    now = datetime.now(timezone.utc)
+    stamp = now.isoformat(timespec="seconds")
     try:
         data = json.loads(VALUES_FILE.read_text())
     except (FileNotFoundError, json.JSONDecodeError):
         data = []
-    data.append([datetime.now(timezone.utc).isoformat(timespec="seconds"), total])
-    del data[:-20000]  # ca. 70 Tage in 5-Minuten-Schritten
+    data.append([stamp, total])
+    data = _thin(data, lambda r: r[0], now, keep_days=3, older_minutes=5)[-30000:]   # ~100 Tage
     tmp = VALUES_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(data))
     tmp.replace(VALUES_FILE)
+    row = {"t": stamp, "c": round(ov["kpi"].get("cash") or 0.0, 2),
+           "p": {p["symbol"]: round(p["value"], 2) for p in ov["positions"] if p["value"]}}
+    with POS_VALUES_FILE.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, separators=(",", ":")) + "\n")
+    if _t.time() - _last_compact[0] > 6 * 3600:          # alle paar Stunden: auf 8 Tage kürzen, Älteres ausdünnen
+        _last_compact[0] = _t.time()
+        rows = load_position_values()
+        rows = _thin(rows, lambda r: r["t"], now, keep_days=2, older_minutes=15, max_days=8)
+        tmp = POS_VALUES_FILE.with_suffix(".tmp")
+        tmp.write_text("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in rows))
+        tmp.replace(POS_VALUES_FILE)
     return total
+
+
+def load_position_values() -> list[dict]:
+    try:
+        lines = POS_VALUES_FILE.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+    out = []
+    for line in lines:
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue          # halb geschriebene Zeile (z. B. Neustart mitten im Schreiben)
+    return out
 
 
 def load_values() -> list[list]:
