@@ -117,7 +117,9 @@ def build_state(cfg: Config, in_process: bool) -> dict:
                   "shorts": cfg.trading_mode == "leverage" and cfg.allow_short,
                   "max_lev_stocks": zc.max_leverage_stocks, "max_lev_crypto": zc.max_leverage_crypto,
                   "closeout": zc.margin_closeout_pct, "max_gross": zc.max_gross_exposure,
-                  "zocker_buy": zc.buy_threshold, "profile": cfg.zocker_profile},
+                  "zocker_buy": zc.buy_threshold, "profile": cfg.zocker_profile,
+                  "products": [zc.product_min_leverage, zc.product_target_leverage, zc.product_max_leverage]
+                  if getattr(zc, "real_products", False) else None},
         "version": _version(), "log_errors": logbuf.error_times(), "learning": learning.learner().summary(cfg.zocker()),
     }
 

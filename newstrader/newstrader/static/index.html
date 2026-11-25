@@ -702,7 +702,8 @@ function renderHeader(s) {
   $("analystPill").title = "Kosten sind eine Schätzung aus den abgerechneten Tokens. Das Tageslimit steht in config.json (claude_daily_budget_usd).";
   const lev = s.rules.mode === "leverage";
   $("modePill").textContent = lev
-    ? `Modus: Hebel · Long${s.rules.shorts ? " & Short" : ""} · max. ${nf(0).format(s.rules.max_lev_stocks)}x Aktien / ${nf(0).format(s.rules.max_lev_crypto)}x Krypto`
+    ? `Modus: Hebel · Long${s.rules.shorts ? " & Short" : ""} · ${s.rules.products ? `Knock-out-Scheine ${s.rules.products[0]}–${s.rules.products[2]}x`
+      : `max. ${nf(0).format(s.rules.max_lev_stocks)}x Aktien / ${nf(0).format(s.rules.max_lev_crypto)}x Krypto`}`
     : "Modus: Depot · nur Long, ohne Hebel";
   $("banner").innerHTML = !s.summary
     ? `<div class="banner">Noch kein Depot vorhanden – der erste Durchlauf läuft gleich an.</div>` : "";
@@ -1300,7 +1301,8 @@ function renderZockerSettings(s) {
         : "Ruhig: lässt Gewinner laufen (Trailing-Stop 20 %), wenige Trades – im Backtest das beste Ergebnis (62 Trades, +84 %)."}</div>
       <div class="rules" style="padding:10px 0 0">
         <span>${lev ? `Hebel · Long${s.rules.shorts ? " & Short" : ""}` : "Depot ohne Hebel"}</span>
-        ${lev ? `<span>max. ${nf(0).format(s.rules.max_lev_stocks)}x Aktien / ${nf(0).format(s.rules.max_lev_crypto)}x Krypto</span>` : ""}
+        ${s.rules.products ? `<span>echte Knock-out-Scheine · Hebel ${s.rules.products[0]}–${s.rules.products[2]}x (Ziel ${s.rules.products[1]}x)</span>`
+          : lev ? `<span>max. ${nf(0).format(s.rules.max_lev_stocks)}x Aktien / ${nf(0).format(s.rules.max_lev_crypto)}x Krypto</span>` : ""}
         <span>Startkapital ${money(s.summary?.start_capital, 0)}</span></div>
     </div>`;
 }
