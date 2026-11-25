@@ -126,7 +126,17 @@ class Learner:
         best = sorted(syms, key=lambda kv: -sum(kv[1]["last"]) / len(kv[1]["last"]))[:3]
         worst = sorted(syms, key=lambda kv: sum(kv[1]["last"]) / len(kv[1]["last"]))[:3]
         lessons = []
-        if s["n"] < MIN_TRADES:
+        if cfg.zocker_strategy == "momentum":
+            closed = [x for x in s["log"] if (x.get("entry") or {}).get("strategy") == "momentum"]
+            if not closed:
+                lessons.append("Noch keine abgeschlossenen Momentum-Trades. Feste Regeln – sie werden nicht nachgeführt, "
+                               "weil jede Anpassung an wenige Trades nur Zufall nachjagt.")
+            else:
+                avg = sum(x["ret"] for x in closed) / len(closed)
+                wins = sum(1 for x in closed if x["ret"] > 0)
+                lessons.append(f"{len(closed)} Momentum-Trades abgeschlossen: {wins} im Plus, im Schnitt {avg:+.0%} auf den Einsatz. "
+                               "Momentum lebt von wenigen großen Gewinnern – viele kleine Verluste sind normal.")
+        elif s["n"] < MIN_TRADES:
             lessons.append(f"Sammelt noch Erfahrung – ab {MIN_TRADES} abgeschlossenen Trades passt er sich an ({s['n']} bisher).")
         else:
             tot = cfg.weight_technical + cfg.weight_news
@@ -143,7 +153,7 @@ class Learner:
                 if v.get("n", 0) >= MIN_TRADES:
                     lessons.append(f"{label}: im Schnitt {v['ret']:+.0%} auf den Einsatz.")
         blocked = [k for k, v in s["symbols"].items() if v.get("blocked_until") and not self.allows(k, now)]
-        if blocked:
+        if blocked and cfg.zocker_strategy != "momentum":
             lessons.append(f"Pause nach zwei Verlusten in Folge: {', '.join(blocked)}.")
         return {"n": s["n"], "winrate": s["winrate"], "liq": s["liq"], "acc_tech": s["acc_tech"], "acc_news": s["acc_news"],
                 "buy_threshold": t.buy_threshold, "short_threshold": t.short_threshold,
@@ -162,5 +172,7 @@ def learner() -> Learner:
 
 
 def zocker_cfg(cfg: Config) -> Config:
-    """Einstellungen für den Zocker: Profil (z. B. „maximal“) + das bisher Gelernte."""
-    return learner().tune(cfg.zocker())
+    """Einstellungen für den Zocker. Momentum hat feste Regeln (im Backtest robust) – nachgeführt wird nur bei der
+    alten Signal-Strategie."""
+    z = cfg.zocker()
+    return z if z.zocker_strategy == "momentum" else learner().tune(z)

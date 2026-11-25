@@ -48,7 +48,7 @@ def _version() -> str:
 
 def build_state(cfg: Config, in_process: bool) -> dict:
     from .bot import running_pid
-    from . import learning, logbuf
+    from . import learning, logbuf, momentum
     zc = learning.zocker_cfg(cfg)  # Zocker: eigenes Profil + Gelerntes
     pf = _read_json(STATE_DIR / "portfolio.json", None)
     cycle = _read_json(STATE_DIR / "last_cycle.json", {"symbols": {}})
@@ -113,14 +113,15 @@ def build_state(cfg: Config, in_process: bool) -> dict:
         "trades": _trades(),
         "rules": {"buy": cfg.buy_threshold, "sell": cfg.sell_threshold, "stop_loss": zc.stop_loss_pct,
                   "trailing": zc.trailing_stop_pct, "max_position": zc.max_position_pct,
-                  "mode": cfg.trading_mode, "short": zc.short_threshold, "cover": zc.cover_threshold,
-                  "shorts": cfg.trading_mode == "leverage" and cfg.allow_short,
+                  "mode": zc.trading_mode, "short": zc.short_threshold, "cover": zc.cover_threshold,
+                  "shorts": zc.trading_mode == "leverage" and zc.allow_short, "strategy": zc.zocker_strategy,
                   "max_lev_stocks": zc.max_leverage_stocks, "max_lev_crypto": zc.max_leverage_crypto,
                   "closeout": zc.margin_closeout_pct, "max_gross": zc.max_gross_exposure,
-                  "zocker_buy": zc.buy_threshold, "profile": cfg.zocker_profile,
+                  "zocker_buy": zc.buy_threshold,
                   "products": [zc.product_min_leverage, zc.product_target_leverage, zc.product_max_leverage]
                   if getattr(zc, "real_products", False) else None},
-        "version": _version(), "log_errors": logbuf.error_times(), "learning": learning.learner().summary(cfg.zocker()),
+        "version": _version(), "log_errors": logbuf.error_times(), "learning": learning.learner().summary(zc),
+        "momentum": momentum.view(zc, set(pf["positions"]) if pf else set()) if zc.zocker_strategy == "momentum" else None,
     }
 
 
@@ -581,13 +582,6 @@ def make_handler(cfg: Config, in_process: bool):
                     _sh.copy(CONFIG_FILE, dst / "config.json")
                 n = sum(1 for p in (dst / "state").rglob("*") if p.is_file())
                 return self._json({"ok": True, "files": n, "path": str(dst)})
-            if path == "/api/pf/zocker/profile":
-                from .config import ZOCKER_PROFILES
-                name = str(body.get("profile", ""))
-                if name not in ("maximal", "action"):
-                    raise ValueError("Unbekanntes Profil")
-                (STATE_DIR / "zocker_profile.txt").write_text(name)
-                return self._json({"ok": True, "profile": name})
             if path == "/api/pf/spec":
                 from . import spekulation
                 return self._json({"ok": True, "spec": spekulation.set_enabled(bool(body.get("enabled")))})

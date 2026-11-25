@@ -40,7 +40,13 @@ class Config:
     kraken_pairs: dict[str, str] = field(default_factory=lambda: {"BTC-EUR": "XBTEUR", "ETH-EUR": "ETHEUR"})
     risk_check_seconds: float = 20.0    # so oft werden Stop-Loss/Margin offener Positionen mit Echtzeitkursen geprüft
     start_capital: float = 10_000.0
-    zocker_profile: str = "action"      # Zocker (Spielgeld): "maximal" (ruhig) oder "action" (aktiv, Gewinnsicherung)
+    zocker_profile: str = ""            # alt (Ruhig/Action) – wird nicht mehr verwendet
+    zocker_strategy: str = "signal"     # "momentum" für den Zocker (siehe ZOCKER unten); "signal" = alte Signal-Regeln
+    mom_positions: int = 3
+    mom_lookback_days: int = 126
+    mom_skip_days: int = 5
+    mom_keep_rank: int = 6
+    mom_cooldown_hours: float = 20.0
     lev_always_max: bool = False        # Hebel immer voll ausreizen statt nach Signalstärke
 
     # Schleife
@@ -145,17 +151,9 @@ class Config:
     slippage_pct: float = 0.0005        # 0,05 % schlechterer Ausführungskurs
 
     def zocker(self) -> "Config":
-        """Einstellungen nur für den Zocker (das echte Portfolio nutzt weiter die normalen Werte).
-        Das in der Oberfläche gewählte Profil (state/zocker_profile.txt) hat Vorrang vor config.json."""
+        """Einstellungen nur für den Zocker (das echte Portfolio nutzt weiter die normalen Werte)."""
         from dataclasses import replace
-        name = self.zocker_profile
-        try:
-            chosen = (STATE_DIR / "zocker_profile.txt").read_text().strip()
-            if chosen in ZOCKER_PROFILES:
-                name = chosen
-        except OSError:
-            pass
-        return replace(self, zocker_profile=name, **ZOCKER_PROFILES.get(name, {}))
+        return replace(self, **ZOCKER)
 
     @classmethod
     def load(cls) -> "Config":
@@ -173,37 +171,31 @@ class Config:
         CONFIG_FILE.write_text(json.dumps(asdict(self), indent=2) + "\n")
 
 
-# Zocker-Profile. „maximal“: so viel Gewinn wie möglich – volles Risiko, Spielgeld.
-ZOCKER_PROFILES: dict[str, dict] = {
-    "standard": {},
-    "maximal": {
-        # Backtest Jan–Nov 2026 (228 Werte, nur Technik): +84 %, max. Rückgang −40 %, 62 Trades.
-        # 20x Hebel: −99 % (zu viele Margin-Calls). Umschichten auf stärkere Signale: deutlich schlechter (zu viel Hin und Her).
-        # Achtung: Nachbarwerte der Einstellungen schwanken stark – das Ergebnis ist zu einem guten Teil Zufall.
-        "lev_always_max": True,         # immer den vollen Hebel …
-        "max_leverage_stocks": 5.0,     # … und der liegt bei 5x
-        "max_leverage_crypto": 5.0,
-        "max_gross_exposure": 12.5,     # Gesamtvolumen bis 12,5x Depotwert
-        "max_position_pct": 0.20,       # bis 20 % des Depots als Margin je Position (mehr Positionen gleichzeitig)
-        "min_cash_reserve_pct": 0.0,    # keine Cash-Reserve
-        "buy_threshold": 0.12,          # früh einsteigen …
-        "short_threshold": -0.12,
-        "sell_threshold": -0.05,        # … und raus, sobald das Signal kippt
-        "cover_threshold": 0.05,
-        "stop_loss_pct": 0.10,          # 10 % gegen die Position
-        "trailing_stop_pct": 0.20,      # Gewinne laufen lassen: erst 20 % Rücklauf vom besten Kurs sichern
-        "min_hold_minutes": 10.0,
-        # „mehr zocken“: früher rein, mehr Positionen gleichzeitig, umschichten, nicht auf Claude warten
-        "entry_requires_claude": False,
-        "entry_requires_news": False,
-        "lev_needs_claude": False,
-        "rotate_gap": 0.0,              # Umschichten aus: kostete im Backtest viel Rendite
-    },
+# Zocker: ein festes Setup – Momentum mit wenigen großen Positionen (Entscheidung 25.11.2026 nach Backtests).
+# 5 Jahre Tageskurse, 228 Werte, drei getrennte Abschnitte (2022–2026): Momentum war in jedem Abschnitt und in jeder
+# Nachbar-Einstellung positiv; die bisherigen Technik-/Nachrichtensignale verloren bei jeder Einstellung (auch ohne Hebel),
+# Shorts verschlechterten alles, Hebel ≥ 3 brach im letzten Abschnitt ein, 12x war in jeder Variante ruinös.
+# Achtung: Die Beobachtungsliste besteht aus heute bekannten Werten – das schönt jeden Backtest (Überlebende).
+ZOCKER: dict = {
+    "zocker_strategy": "momentum",
+    "trading_mode": "leverage",
+    "allow_short": False,
+    "mom_positions": 3,             # wenige, große Positionen: je ⅓ des Kontos
+    "mom_lookback_days": 126,       # Kursstärke der letzten ~6 Monate …
+    "mom_skip_days": 5,             # … ohne die letzte Woche (kurzfristiges Zurückschwingen)
+    "mom_keep_rank": 6,             # gehalten wird, solange der Wert unter den besten 6 ist
+    "mom_cooldown_hours": 20.0,     # nach einem Stop nicht sofort wieder rein
+    "max_position_pct": 1 / 3,
+    "min_cash_reserve_pct": 0.0,
+    "max_gross_exposure": 3.0,
+    "stop_loss_pct": 0.25,          # Stop 25 % unter Einstand …
+    "trailing_stop_pct": 0.25,      # … bzw. 25 % unter dem besten Kurs (Gewinner laufen lassen)
+    "lock_after_pct": 0.0, "lock_trailing_pct": 0.0, "take_profit_pct": 0.0, "max_hold_days": 0.0,
+    "max_margin_factor": 0.0, "rotate_gap": 0.0,
+    "real_products": True,          # echte TR-Knock-outs mit Hebel um 2 (KO-Schwelle ~50 % entfernt) …
+    "product_target_leverage": 2.0,
+    "product_min_leverage": 1.6,
+    "product_max_leverage": 2.6,    # … gibt es keinen passenden Schein, wird die Aktie selbst gekauft (1x)
+    "product_stop_share": 0.6,
+    "product_searches_per_cycle": 6,
 }
-# „action“: Gewinne regelmäßig sichern – ab +4 % Kursplus Trailing-Stop eng auf 3 %. Im Backtest 227 Trades, +11 %
-# (feste Gewinnmitnahme/Haltedauer: −52 %; „ruhig“ mit 20 % Trailing: +84 %, aber nur 62 Trades).
-ZOCKER_PROFILES["action"] = {**ZOCKER_PROFILES["maximal"], "lock_after_pct": 0.04, "lock_trailing_pct": 0.03,
-                             "max_position_pct": 0.10,      # kleine Positionen: fast immer Geld für neue Ideen
-                             "max_margin_factor": 1.5,      # Altlasten > 15 % Einsatz werden geschlossen
-                             "real_products": True}         # echte TR-Knock-outs (Hebel ~12, max. 15)
-ZOCKER_PROFILES["maximal"]["real_products"] = True

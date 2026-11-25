@@ -357,6 +357,16 @@ button.busy { opacity: .75; cursor: progress; }
 .zmeta { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--ink-2); margin-top: 6px; font-variant-numeric: tabular-nums; }
 .zmeta b { color: var(--ink); font-weight: 600; }
 .zprod { font-size: 12.5px; margin-top: 4px; }
+.mrow { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto 64px; gap: 10px; align-items: center; padding: 7px 16px;
+  border-top: 1px solid var(--grid); font-size: 13px; }
+.mrow:first-child { border-top: 0; }
+.mrow.held { background: color-mix(in srgb, var(--series-1) 8%, transparent); }
+.mrank { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.mname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mtag { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.mtag.kaufen { color: var(--ink); font-weight: 600; }
+.mrow.held .mtag { color: var(--series-1); font-weight: 600; }
+.mval { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
 .ztr { max-width: none; margin-top: 5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .zprod a { color: var(--ink); }
 @media (max-width: 420px) { .subnav { gap: 3px; } .subnav button { padding: 7px 9px; font-size: 13px; } }
@@ -474,6 +484,11 @@ button.busy { opacity: .75; cursor: progress; }
       <div class="hint" id="posHint"></div>
       <div class="tbl" id="positions"></div>
     </div>
+  </section>
+  <section class="card hidden" id="momCard" style="margin-top:14px">
+    <h2>Rangliste</h2>
+    <div class="hint" id="momHint"></div>
+    <div id="momList" style="padding:6px 0 8px"></div>
   </section>
   </div>
 
@@ -653,30 +668,23 @@ function render(s) {
   renderTrades(s);
   pcInitControls(s);
   renderZockerSettings(s);
+  renderMomentum(s);
   renderSystem(s);
   renderLogBadge(s);
 }
 
-document.addEventListener("click", async (e) => {
-  const b = e.target.closest("[data-zprof]");
-  if (!b) return;
-  const r = await fetch("api/pf/zocker/profile", { method: "POST", headers: { "Content-Type": "application/json", "X-NewsTrader": "1" },
-    body: JSON.stringify({ profile: b.dataset.zprof }) }).then((x) => x.json()).catch(() => ({ ok: false, error: "Keine Verbindung" }));
-  if (!r.ok) { toast(r.error, "err"); return; }
-  toast(r.profile === "action" ? "Action-Profil aktiv – ab dem nächsten Durchlauf" : "Ruhiges Profil aktiv");
-  load();
-});
 function renderLearning(s) {
   const L = s.learning;
   if (!L) { $("learnCard").innerHTML = ""; return; }
   const recent = (L.recent || []).slice(0, 6).map((r) => `<div class="cmp-row"><div><b>${esc(r.symbol)}</b> ${r.side === "short" ? "Short" : "Long"} ${r.lev}x
       <div class="name">${esc(r.reason)}</div></div><div class="${r.ret > 0 ? "up" : "down"}" style="white-space:nowrap">${r.ret > 0 ? "+" : ""}${nf(0).format(r.ret * 100)} % · ${r.pnl > 0 ? "+" : ""}${nf(2).format(r.pnl)} €</div></div>`).join("");
-  $("learnCard").innerHTML = `<h2>Lernmodus</h2>
-    <div class="hint">Was der Zocker aus seinen geschlossenen Trades gelernt hat. Profil umstellen: Einstellungen → Zocker.</div>
+  const mom = s.rules.strategy === "momentum";
+  $("learnCard").innerHTML = `<h2>${mom ? "Bilanz" : "Lernmodus"}</h2>
+    <div class="hint">${mom ? "Wie die abgeschlossenen Trades gelaufen sind." : "Was der Zocker aus seinen geschlossenen Trades gelernt hat."}</div>
     <div style="padding:10px 16px 16px">
-      <div class="rules" style="padding:0 0 8px"><span>${L.n} Trades ausgewertet</span><span>Trefferquote ${nf(0).format(L.winrate * 100)} %</span>
+      ${mom ? "" : `<div class="rules" style="padding:0 0 8px"><span>${L.n} Trades ausgewertet</span><span>Trefferquote ${nf(0).format(L.winrate * 100)} %</span>
         <span>Margin-Calls ${nf(0).format(L.liq * 100)} %</span><span>Hebel max. ${nf(0).format(L.max_leverage)}x</span>
-        <span>Long ab ${L.buy_threshold >= 0 ? "+" : ""}${nf(2).format(L.buy_threshold)} · Short ab ${nf(2).format(L.short_threshold)}</span></div>
+        <span>Long ab ${L.buy_threshold >= 0 ? "+" : ""}${nf(2).format(L.buy_threshold)} · Short ab ${nf(2).format(L.short_threshold)}</span></div>`}
       <div class="tr-rep">${L.lessons.map((x) => `<div>${esc(x)}</div>`).join("")}</div>
       ${recent ? `<div class="name" style="padding:10px 0 2px">Zuletzt geschlossen</div>${recent}` : ""}
     </div>`;
@@ -827,9 +835,15 @@ function renderPositions(s) {
   const r = s.rules;
   const lev = r.mode === "leverage";
   const real = s.positions.some((p) => p.product);
-  $("posHint").textContent = real
-    ? `Echte Knock-out-Scheine von Trade Republic (Hebel um 12x). Der Stop liegt vor der Knock-out-Schwelle${r.profile === "action" ? ", ab +4 % Plus wird er eng (3 %) nachgezogen" : ""}. Wird die Schwelle erreicht, ist der Einsatz weg.`
+  $("posHint").textContent = r.strategy === "momentum"
+    ? `Höchstens ${s.momentum?.rules.positions ?? 3} Positionen, je ein Drittel des Kontos. Stop ${nf(0).format(r.stop_loss * 100)} % unter Einstand bzw. ${nf(0).format(r.trailing * 100)} % unter dem besten Kurs.`
+    : real
+    ? `Echte Knock-out-Scheine von Trade Republic. Der Stop liegt vor der Knock-out-Schwelle. Wird die Schwelle erreicht, ist der Einsatz weg.`
     : `Stop-Loss bei ${nf(0).format(r.stop_loss * 100)} % gegen die Position, Trailing-Stop ${nf(0).format(r.trailing * 100)} % vom besten Kurs`;
+  if (!s.positions.length && r.strategy === "momentum") {
+    $("positions").innerHTML = `<div class="empty">Noch keine Positionen – gekauft wird, sobald die Börse der besten Werte aus der Rangliste offen ist.</div>`;
+    return;
+  }
   if (!s.positions.length) {
     $("positions").innerHTML = `<div class="empty">Keine offenen Positionen – der Bot wartet auf ein Signal über ${signed(r.zocker_buy ?? r.buy)}${r.shorts ? ` (Long) oder unter ${signed(r.short)} (Short)` : ""}.</div>`;
     return;
@@ -1288,23 +1302,40 @@ $("sigSearch").addEventListener("input", () => STATE && renderSignals(STATE));
 
 // ---------- Einstellungen: Zocker + System ----------
 function renderZockerSettings(s) {
-  const prof = s.rules.profile || "maximal";
-  const lev = s.rules.mode === "leverage";
-  $("zSettings").innerHTML = `<h2>Zocker-Profil</h2>
-    <div class="hint">Gilt ab dem nächsten Durchlauf. Der Zocker handelt nur auf dem Papier – echte Knock-out-Scheine, aber kein echtes Geld.</div>
-    <div style="padding:12px 16px 16px">
-      <div class="seg" style="margin-bottom:8px">
-        <button data-zprof="maximal" class="${prof === "maximal" ? "on" : ""}">Ruhig</button>
-        <button data-zprof="action" class="${prof === "action" ? "on" : ""}">Action</button></div>
-      <div class="name" style="line-height:1.5">${prof === "action"
-        ? "Action: sichert Gewinne – ab +4 % Kursplus wird der Stop eng auf 3 % nachgezogen. Viele Trades (Backtest: 227, +11 %)."
-        : "Ruhig: lässt Gewinner laufen (Trailing-Stop 20 %), wenige Trades – im Backtest das beste Ergebnis (62 Trades, +84 %)."}</div>
-      <div class="rules" style="padding:10px 0 0">
-        <span>${lev ? `Hebel · Long${s.rules.shorts ? " & Short" : ""}` : "Depot ohne Hebel"}</span>
-        ${s.rules.products ? `<span>echte Knock-out-Scheine · Hebel ${s.rules.products[0]}–${s.rules.products[2]}x (Ziel ${s.rules.products[1]}x)</span>`
-          : lev ? `<span>max. ${nf(0).format(s.rules.max_lev_stocks)}x Aktien / ${nf(0).format(s.rules.max_lev_crypto)}x Krypto</span>` : ""}
-        <span>Startkapital ${money(s.summary?.start_capital, 0)}</span></div>
-    </div>`;
+  const M = s.momentum;
+  if (!M) { $("zSettings").innerHTML = `<h2>Zocker</h2><div class="empty">Signal-Strategie (alt)</div>`; return; }
+  const R = M.rules;
+  $("zSettings").innerHTML = `<h2>Zocker-Strategie: Momentum</h2>
+    <div class="hint">Fest eingestellt – es gibt nichts umzuschalten. Spielgeld: echte Scheine, aber kein echtes Geld.</div>
+    <div class="tr-rep" style="margin:12px 16px 0">
+      <div><b>Auswahl:</b> die Aktien mit der stärksten Kursentwicklung der letzten 6 Monate (ohne die letzte Woche).</div>
+      <div><b>Positionen:</b> höchstens ${R.positions}, je ein Drittel des Kontos – wenige, große Wetten.</div>
+      <div><b>Hebel:</b> echte Knock-out-Scheine von Trade Republic mit Hebel ${nf(1).format(R.lev[0])}–${nf(1).format(R.lev[2])}x
+        (Ziel ${nf(0).format(R.lev[1])}x, Knock-out-Schwelle rund 50 % entfernt). Gibt es keinen, die Aktie selbst.</div>
+      <div><b>Verkauf:</b> wenn der Wert nicht mehr unter den besten ${R.keep} ist, oder ${nf(0).format(R.stop * 100)} % unter Einstand
+        bzw. ${nf(0).format(R.trailing * 100)} % unter dem besten Kurs. Keine Leerverkäufe.</div>
+    </div>
+    <div class="name" style="padding:10px 16px 16px;line-height:1.5">Warum so: Im Test über 5 Jahre (2022–2026, drei getrennte Abschnitte)
+      war das in jedem Abschnitt im Plus. Die alten Signal-Regeln verloren bei jeder Einstellung. Mehr Hebel als ~2,5x
+      brach im letzten Abschnitt ein, 12x führte in jeder Variante zum Totalverlust. Die Testzahlen sind geschönt, weil die
+      Beobachtungsliste nur heute bekannte Werte enthält – eine Garantie ist das nicht.</div>`;
+}
+
+function renderMomentum(s) {
+  const M = s.momentum;
+  $("momCard").classList.toggle("hidden", !M);
+  if (!M) return;
+  const R = M.rules;
+  const rows = M.ranking.map((r) => {
+    const zone = r.rank <= R.positions ? "kaufen" : r.rank <= R.keep ? "halten" : "";
+    return `<div class="mrow${r.held ? " held" : ""}"><span class="mrank">${r.rank}</span>
+      <div class="mname"><b>${esc(r.name)}</b> <span class="name">${esc(r.symbol)}</span></div>
+      <span class="mtag ${zone}">${r.held ? "im Depot" : zone === "kaufen" ? "wird gekauft" : zone === "halten" ? "Halte-Zone" : ""}</span>
+      <span class="mval up">${signed(r.mom * 100, 0)} %</span></div>`;
+  }).join("");
+  $("momList").innerHTML = rows || `<div class="empty">Rangliste wird beim nächsten Durchlauf berechnet.</div>`;
+  $("momHint").textContent = `Kursveränderung der letzten 6 Monate (ohne letzte Woche) · ${M.n} Werte mit positivem Trend`
+    + (M.time ? ` · berechnet ${ago(M.time)}` : "") + (M.cooldown.length ? ` · Pause nach Stop: ${M.cooldown.join(", ")}` : "");
 }
 
 function renderSystem(s) {

@@ -181,7 +181,7 @@ _closes_cache: dict[str, tuple[float, pd.Series]] = {}
 _closes_lock = threading.Lock()
 
 
-def get_daily_closes(symbol: str, period: str = "6mo", max_age_minutes: float = 120) -> pd.Series | None:
+def get_daily_closes(symbol: str, period: str = "1y", max_age_minutes: float = 120) -> pd.Series | None:
     """Tagesschlusskurse, zwischengespeichert (ändern sich nur einmal am Tag; der aktuelle Kurs kommt live dazu).
 
     Fällt Yahoo aus, werden die zuletzt geladenen Daten weiterverwendet – auch über einen Neustart hinweg.

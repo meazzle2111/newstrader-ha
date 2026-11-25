@@ -135,6 +135,14 @@ def collect(cfg: Config, analyst: NewsAnalyst, held: set[str] | None = None
     best = sorted(valid, key=lambda b: -b[2].score)[:n_long]
     worst = sorted(valid, key=lambda b: b[2].score)[: cfg.news_top_n - n_long]   # Rest für Shorts im Zockerportfolio
     focus = set(held) | {b[0] for b in best + worst}
+    zc = cfg.zocker()
+    if zc.zocker_strategy == "momentum":   # Zocker: Rangliste nach Kursstärke; die Besten brauchen Live-Kurse
+        from . import momentum
+        try:
+            order = momentum.update(zc, {b[0]: b[1] for b in base if b[1] is not None})
+            focus |= set(order[:zc.mom_keep_rank + 2])
+        except Exception:  # noqa: BLE001
+            log.exception("Momentum-Rangliste fehlgeschlagen")
     # Stufe 1: Live-Kurs + Nachrichten nur für den Fokus (deutlichste Signale + alles im Depot)
     with ThreadPoolExecutor(cfg.fetch_workers) as ex:
         stage1 = list(ex.map(lambda s: _stage1(cfg, s), [s for s in universe if s in focus]))
@@ -360,8 +368,12 @@ def run_once(cfg: Config, broker: PaperBroker, analyst: NewsAnalyst) -> None:
     lrn = learning.learner()
     broker.cfg = learning.zocker_cfg(cfg)     # Zocker-Profil + Gelerntes (nur für den Zocker)
     broker.on_close = lrn.record
-    close_legacy_positions(broker, snaps)
-    run_strategy(broker, broker.cfg, snaps, claude_active=analyst.status() == "claude", learner=lrn)
+    if broker.cfg.zocker_strategy == "momentum":
+        from . import momentum
+        momentum.run(broker, broker.cfg, snaps)
+    else:
+        close_legacy_positions(broker, snaps)
+        run_strategy(broker, broker.cfg, snaps, claude_active=analyst.status() == "claude", learner=lrn)
     broker.record_equity({s: v.price for s, v in snaps.items()})
     broker.record_levels()
     broker.save()
