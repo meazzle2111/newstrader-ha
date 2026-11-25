@@ -142,7 +142,7 @@ def collect(cfg: Config, analyst: NewsAnalyst, held: set[str] | None = None
         try:
             order = momentum.update(zc, {b[0]: b[1] for b in base if b[1] is not None})
             focus |= set(order[:zc.mom_keep_rank + 2])
-            mom_cands = [s for s in order[:zc.mom_keep_rank] if s not in held][:zc.mom_positions + 2]
+            mom_cands = [s for s in order[:zc.mom_pool] if s not in held]    # bekommen eine KI-Nachrichtenbewertung
         except Exception:  # noqa: BLE001
             log.exception("Momentum-Rangliste fehlgeschlagen")
     # Stufe 1: Live-Kurs + Nachrichten nur für den Fokus (deutlichste Signale + alles im Depot)

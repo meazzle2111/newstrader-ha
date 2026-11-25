@@ -47,6 +47,12 @@ class Config:
     mom_skip_days: int = 5
     mom_keep_rank: int = 6
     mom_cooldown_hours: float = 20.0
+    mom_pool: int = 10                  # so viele der stärksten Momentum-Werte bekommen eine KI-Nachrichtenbewertung
+    mom_news_weight: float = 0.6        # Auswahl: 60 % Nachrichtenlage, 40 % Momentum
+    mom_news_min: float = 0.0           # gekauft wird nur bei neutraler oder positiver Nachrichtenlage
+    mom_news_exit: float = -0.30        # gehaltene Position: Nachrichten so schlecht -> verkaufen
+    mom_cash_reserve: float = 0.15      # so viel bleibt immer Cash
+    mom_buy_pause: str = "14:15-16:00"  # keine Käufe (US-Daten 14:30, US-Börsenstart 15:30) – leer = keine Pause
     lev_always_max: bool = False        # Hebel immer voll ausreizen statt nach Signalstärke
 
     # Schleife
@@ -182,12 +188,12 @@ ZOCKER: dict = {
     "zocker_strategy": "momentum",
     "trading_mode": "leverage",
     "allow_short": False,
-    "mom_positions": 3,             # wenige, große Positionen: je ⅓ des Kontos
+    "mom_positions": 6,             # gestreut: bis zu 6 Positionen (25.11.: mehr streuen, mehr auf Nachrichten verlassen)
     "mom_lookback_days": 126,       # Kursstärke der letzten ~6 Monate …
     "mom_skip_days": 5,             # … ohne die letzte Woche (kurzfristiges Zurückschwingen)
-    "mom_keep_rank": 6,             # gehalten wird, solange der Wert unter den besten 6 ist
+    "mom_keep_rank": 20,            # gehalten wird, solange der Wert unter den besten 20 ist (und die Nachrichten passen)
     "mom_cooldown_hours": 20.0,     # nach einem Stop nicht sofort wieder rein
-    "max_position_pct": 1 / 3,
+    "max_position_pct": 1 / 6,
     "min_cash_reserve_pct": 0.0,
     "max_gross_exposure": 3.0,
     "stop_loss_pct": 0.25,          # Obergrenze; bei Scheinen gilt 60 % des Abstands zur Knock-out-Schwelle (5x: ~12 %) …

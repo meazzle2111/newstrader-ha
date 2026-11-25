@@ -96,7 +96,7 @@ def migrate_config() -> None:
 
 # Ändert sich diese Kennung, startet das Zockerkonto (Spielgeld) beim nächsten Start einmalig neu.
 # Das echte Portfolio, Trade Republic und die Einstellungen bleiben unberührt.
-ZOCKER_RESET_ID = "2026-11-25-momentum-5x-kaufpruefung"
+ZOCKER_RESET_ID = "2026-11-25-momentum-nachrichten-gestreut"
 ZOCKER_FILES = ("portfolio.json", "trades.csv", "trades_alt.csv", "levels.json", "zocker_learning.json", "momentum.json")
 
 

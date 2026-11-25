@@ -853,7 +853,7 @@ function renderPositions(s) {
   const lev = r.mode === "leverage";
   const real = s.positions.some((p) => p.product);
   $("posHint").textContent = r.strategy === "momentum"
-    ? `Höchstens ${s.momentum?.rules.positions ?? 3} Positionen, je ein Drittel des Kontos. Stop und Trailing-Stop bei Scheinen ~${nf(0).format((s.momentum?.rules.stop_product ?? 0.12) * 100)} % (vor der Knock-out-Schwelle), bei Aktien ${nf(0).format(r.stop_loss * 100)} %.`
+    ? `Bis zu ${s.momentum?.rules.positions ?? 6} Positionen, ${nf(0).format((s.momentum?.rules.reserve ?? 0.15) * 100)} % bleiben Cash. Stop und Trailing-Stop bei Scheinen ~${nf(0).format((s.momentum?.rules.stop_product ?? 0.12) * 100)} % (vor der Knock-out-Schwelle), bei Aktien ${nf(0).format(r.stop_loss * 100)} %.`
     : real
     ? `Echte Knock-out-Scheine von Trade Republic. Der Stop liegt vor der Knock-out-Schwelle. Wird die Schwelle erreicht, ist der Einsatz weg.`
     : `Stop-Loss bei ${nf(0).format(r.stop_loss * 100)} % gegen die Position, Trailing-Stop ${nf(0).format(r.trailing * 100)} % vom besten Kurs`;
@@ -1322,11 +1322,16 @@ function renderZockerSettings(s) {
   const M = s.momentum;
   if (!M) { $("zSettings").innerHTML = `<h2>Zocker</h2><div class="empty">Signal-Strategie (alt)</div>`; return; }
   const R = M.rules;
-  $("zSettings").innerHTML = `<h2>Zocker-Strategie: Momentum</h2>
+  $("zSettings").innerHTML = `<h2>Zocker-Strategie: Momentum + Nachrichten</h2>
     <div class="hint">Fest eingestellt – es gibt nichts umzuschalten. Spielgeld: echte Scheine, aber kein echtes Geld.</div>
     <div class="tr-rep" style="margin:12px 16px 0">
       <div><b>Auswahl:</b> die Aktien mit der stärksten Kursentwicklung der letzten 6 Monate (ohne die letzte Woche).</div>
-      <div><b>Positionen:</b> höchstens ${R.positions}, je ein Drittel des Kontos – wenige, große Wetten.</div>
+      <div><b>Streuung:</b> bis zu ${R.positions} Positionen, je etwa 1/${R.positions} von ${nf(0).format((1 - R.reserve) * 100)} % des Kontos.
+        ${nf(0).format(R.reserve * 100)} % bleiben immer Cash${R.pause ? `, werktags ${esc(R.pause)} Uhr wird nichts gekauft (US-Wirtschaftsdaten 14:30, unruhiger US-Börsenstart 15:30)` : ""}.
+        Gibt es nicht genug gute Kandidaten, bleibt mehr Cash.</div>
+      <div><b>Nachrichten:</b> Die ${R.pool} stärksten Momentum-Werte bekommen eine KI-Bewertung ihrer Nachrichten. Gekauft wird nur bei
+        neutraler oder positiver Lage, Reihenfolge nach Wertung (${nf(0).format(R.news_weight * 100)} % Nachrichten, ${nf(0).format((1 - R.news_weight) * 100)} % Momentum).
+        Kippt die Nachrichtenlage einer Position auf ${signed(R.news_exit, 2)} oder schlechter, wird verkauft.</div>
       <div><b>Hebel:</b> echte Knock-out-Scheine von Trade Republic mit Hebel ${nf(1).format(R.lev[0])}–${nf(1).format(R.lev[2])}x
         (Ziel ${nf(0).format(R.lev[1])}x, Knock-out-Schwelle rund ${nf(0).format(100 / R.lev[1])} % entfernt). Gibt es keinen, die Aktie selbst.</div>
       <div><b>Kaufprüfung:</b> Bevor gekauft wird, schreibt die KI ein Gutachten zu genau diesem Kauf: Kommt der Anstieg nur von einem
@@ -1350,18 +1355,20 @@ function renderMomentum(s) {
   $("momCard").classList.toggle("hidden", !M);
   if (!M) return;
   const R = M.rules;
-  const ST = { veto: ["✕ nicht kaufen", "veto"], wait: ["⏳ wird geprüft", ""], ok: ["✓ geprüft", "kaufen"], hold: ["⏸ jetzt nicht", ""],
-               pause: ["Pause nach Stop", ""], closed: ["Börse zu", ""], full: ["Plätze belegt", ""] };
+  const ST = { veto: ["✕ nicht kaufen", "veto"], wait: ["⏳ wird geprüft", ""], ok: ["✓ kaufbereit", "kaufen"], hold: ["⏸ jetzt nicht", ""],
+               pause: ["Pause nach Stop", ""], closed: ["Börse zu", ""], full: ["Plätze belegt", ""], weak: ["📰 zu schwach", ""],
+               timepause: ["🕒 Kaufpause", ""], cash: ["Cash-Reserve", ""], bought: ["gekauft", "kaufen"] };
   const rows = M.ranking.map((r) => {
-    const zone = r.rank <= R.positions ? "kaufen" : r.rank <= R.keep ? "halten" : "";
     const st = !r.held && r.status ? ST[r.status[0]] : null;
-    const tag = r.held ? "im Depot" : st ? st[0] : zone === "kaufen" ? "wird gekauft" : zone === "halten" ? "Halte-Zone" : "";
+    const tag = r.held ? "im Depot" : st ? st[0] : "";
+    const nw = r.news == null ? "" : `<span class="name"> · Nachrichten <b class="${cls(r.news)}">${signed(r.news, 2)}</b>${r.ai ? "" : " (vorläufig)"}
+      · Wertung <b>${nf(2).format(r.score)}</b></span>`;
     const c = r.check;
-    const ck = c && r.rank <= R.keep ? `<div class="mcheck ${c.decision === "kaufen" ? "ok" : c.decision === "nicht kaufen" ? "no" : ""}">🧠 ${esc(c.decision)}: ${esc(c.reason || "")}
+    const ck = c ? `<div class="mcheck ${c.decision === "kaufen" ? "ok" : c.decision === "nicht kaufen" ? "no" : ""}">🧠 ${esc(c.decision)}: ${esc(c.reason || "")}
         <span class="name">· ${esc(c.provider || "")}, ${ago(c.time)}</span></div>` : "";
     return `<div class="mrow${r.held ? " held" : ""}" title="${esc(r.status ? r.status[1] : "")}"><span class="mrank">${r.rank}</span>
-      <div class="mname"><b>${esc(r.name)}</b> <span class="name">${esc(r.symbol)}</span>${ck}</div>
-      <span class="mtag ${st ? st[1] : zone}">${tag}</span>
+      <div class="mname"><b>${esc(r.name)}</b> <span class="name">${esc(r.symbol)}</span>${nw}${ck}</div>
+      <span class="mtag ${st ? st[1] : ""}">${tag}</span>
       <span class="mval up">${signed(r.mom * 100, 0)} %</span></div>`;
   }).join("");
   const F = M.filter || {}, V = M.vetoes || [];
@@ -1374,7 +1381,9 @@ function renderMomentum(s) {
     <div class="name" style="padding:6px 16px 0">${F.n ? `Nach mind. 5 Tagen: ${F.n} übersprungene Werte im Schnitt ${signed(F.avg * 100, 1)} % –
       ${F.avg < 0 ? "der Filter hat Verluste vermieden." : "der Filter hat eher Gewinne gekostet."}` : "Aussagekräftig wird das nach ein paar Tagen."}</div>` : "";
   $("momList").innerHTML = (rows || `<div class="empty">Rangliste wird beim nächsten Durchlauf berechnet.</div>`) + vet;
-  $("momHint").textContent = `Kursveränderung der letzten 6 Monate (ohne letzte Woche) · ${M.n} Werte mit positivem Trend`
+  $("momHint").textContent = `Die ${R.pool} stärksten nach Kursveränderung (6 Monate ohne letzte Woche, ${M.n} Werte mit positivem Trend). `
+    + `Gekauft wird nach Wertung: ${nf(0).format(R.news_weight * 100)} % Nachrichten, ${nf(0).format((1 - R.news_weight) * 100)} % Momentum`
+    + (R.paused ? ` · 🕒 Kaufpause bis ${R.pause.split("-")[1]} Uhr` : "")
     + (M.checking ? " · KI prüft gerade Kandidaten …" : "")
     + (M.time ? ` · berechnet ${ago(M.time)}` : "") + (M.cooldown.length ? ` · Pause nach Stop: ${M.cooldown.join(", ")}` : "");
 }

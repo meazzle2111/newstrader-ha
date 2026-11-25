@@ -1,17 +1,16 @@
-"""Zocker-Strategie „Momentum“: wenige große Positionen in den Aktien mit der stärksten Kursentwicklung.
+"""Zocker-Strategie „Momentum + Nachrichten“: gestreut in die stärksten Aktien, deren Nachrichtenlage passt.
 
 Regeln (Einstellungen in config.ZOCKER):
 - Rangliste: Kursveränderung der letzten ~6 Monate ohne die letzte Woche, nur Werte mit positivem Wert.
-- Gekauft werden die besten 3 (je ⅓ des Kontos), über echte Knock-out-Scheine mit Hebel um 5 – gibt es keinen
-  passenden Schein, die Aktie selbst.
-- Verkauft wird, wenn ein Wert aus den besten 6 fällt, oder über Stop-Loss / Trailing-Stop (bei Scheinen 60 % des
-  Abstands zur Knock-out-Schwelle, bei 5x also ~12 %; bei Aktien 25 %).
-- Nach einem Stop wird derselbe Wert ~1 Tag nicht wieder gekauft.
+- Die 10 stärksten bekommen eine KI-Bewertung ihrer Nachrichten. Gekauft wird nur bei neutraler oder positiver Lage;
+  Reihenfolge nach Gesamtwertung: 60 % Nachrichtenlage, 40 % Momentum-Platz.
+- Bis zu 6 Positionen (je ~1/6 von 85 % des Kontos) über echte Knock-out-Scheine mit Hebel um 5 – gibt es keinen
+  passenden Schein, die Aktie selbst. 15 % bleiben immer Cash; werktags 14:15–16:00 keine Käufe (US-Daten, US-Start).
+- Verkauft wird, wenn ein Wert aus den besten 20 fällt, wenn seine Nachrichtenlage klar kippt, oder über Stop-Loss /
+  Trailing-Stop (bei Scheinen 60 % des Abstands zur Knock-out-Schwelle, bei Aktien 25 %).
 - Kaufprüfung („erst nachdenken“): Vor jedem Kauf ein KI-Gutachten zu genau diesem Kauf (Übernahme statt Trend?
   Gewinnwarnung? anstehendes Ereignis? Trend gebrochen?) und eine harte Regel: keine Käufe kurz vor Quartalszahlen.
-- Nachrichten-Filter: Vor jedem Kauf prüft die KI die Nachrichtenlage. Ist sie klar negativ (z. B. Gewinnwarnung,
-  Klage, Herabstufung), wird der Wert übersprungen und der nächste aus der Rangliste rückt nach. Übersprungene Käufe
-  werden weiter beobachtet – so zeigt sich mit der Zeit, ob der Filter Geld spart oder kostet.
+- Nach einem Stop wird derselbe Wert ~1 Tag nicht wieder gekauft. Übersprungene Käufe werden weiter beobachtet.
 """
 from __future__ import annotations
 
@@ -165,8 +164,13 @@ def due_checks(cfg: Config, held: set[str], now: datetime) -> list[dict]:
     """Kandidaten, die ein (neues) Gutachten brauchen: die nächsten Käufe laut Rangliste (mit Reserve)."""
     d, checks = load(), load_checks()
     out = []
-    cands = [dict(r, rank=i + 1) for i, r in enumerate(d["ranking"][:cfg.mom_keep_rank]) if r["symbol"] not in held]
-    for r in cands[:cfg.mom_positions + 2]:
+    sc = d.get("scores", {})
+    cands = [dict(r, rank=i + 1) for i, r in enumerate(d["ranking"][:cfg.mom_pool]) if r["symbol"] not in held]
+    # zu schwache Nachrichten brauchen kein Gutachten; sonst die besten nach Gesamtwertung (unbewertete zuletzt)
+    cands = [r for r in cands if sc.get(r["symbol"], {}).get("news", 0.0) >= cfg.mom_news_min]
+    cands.sort(key=lambda r: -sc.get(r["symbol"], {}).get("score", -1))
+    free = max(0, cfg.mom_positions - len(held))
+    for r in cands[:max(2, free + 2)]:
         c = checks.get(r["symbol"]) or {}
         t = c.get("time") or c.get("failed")
         age_h = (now - datetime.fromisoformat(t)).total_seconds() / 3600 if t else 1e9
@@ -255,6 +259,24 @@ def _note_veto(d: dict, r: dict, snap, now: datetime, text: str) -> None:
     log.info("Momentum: %s übersprungen – %s", sym, text[:200])
 
 
+def combined_score(cfg: Config, rank0: int, pool_size: int, news: float) -> float:
+    """0…1: Nachrichtenlage (−1…+1 -> 0…1) mit mom_news_weight, Momentum-Platz im Pool (bester = 1) mit dem Rest."""
+    m = 1 - rank0 / max(1, pool_size - 1)
+    return cfg.mom_news_weight * (news + 1) / 2 + (1 - cfg.mom_news_weight) * m
+
+
+def in_buy_pause(cfg: Config, now: datetime) -> bool:
+    """Kaufpause werktags (deutsche Zeit), z. B. „14:15-16:00“: US-Wirtschaftsdaten und die unruhige erste US-Handelszeit."""
+    if not cfg.mom_buy_pause or "-" not in cfg.mom_buy_pause:
+        return False
+    from . import portfolio as pf
+    local = now.astimezone(pf.BERLIN)
+    if local.weekday() >= 5:
+        return False
+    a, b = (tuple(int(x) for x in t.strip().split(":")) for t in cfg.mom_buy_pause.split("-"))
+    return a <= (local.hour, local.minute) < b
+
+
 def run(broker, cfg: Config, snaps: dict) -> None:
     """Ein Durchlauf des Zockers: Stops prüfen, aus der Rangliste Gefallene verkaufen, die Besten kaufen."""
     from .strategy import _real_product, check_risk
@@ -276,45 +298,61 @@ def run(broker, cfg: Config, snaps: dict) -> None:
     if ranking and fresh:
         order = [r["symbol"] for r in ranking]
         keep = set(order[:cfg.mom_keep_rank])
-        # 1) Raus, was nicht mehr unter den Besten ist
+        # 1) Raus: Momentum verblasst – oder die Nachrichtenlage kippt klar ins Negative (von der KI bewertet)
         for sym in list(broker.positions):
             snap = snaps.get(sym)
-            if sym in keep or not snap or not snap.tradable:
+            if not snap or not snap.tradable:
                 continue
-            place = order.index(sym) + 1 if sym in order else None
-            broker.close(sym, snap.price, f"Momentum: {f'nur noch Platz {place}' if place else 'Kursstärke nicht mehr positiv'}"
-                                          f" – nicht mehr unter den besten {cfg.mom_keep_rank}")
-        # 2) Die Besten kaufen (freie Plätze, je ⅓ des Kontos). Wert mit klar schlechten Nachrichten -> der nächste rückt nach
+            n = snap.news
+            if sym not in keep:
+                place = order.index(sym) + 1 if sym in order else None
+                broker.close(sym, snap.price, f"Momentum: {f'nur noch Platz {place}' if place else 'Kursstärke nicht mehr positiv'}"
+                                              f" – nicht mehr unter den besten {cfg.mom_keep_rank}")
+            elif n.analyst == "claude" and n.n_headlines and n.score <= cfg.mom_news_exit:
+                broker.close(sym, snap.price, f"Nachrichtenlage kippt ({n.score:+.2f}): {n.summary[:160]}")
+        # 2) Kandidaten: die stärksten Momentum-Werte, bewertet nach Nachrichtenlage (60 %) und Momentum (40 %)
         equity = broker.equity(prices)
         searches = [0]
-        slots = cfg.mom_positions
         status: dict[str, list] = {}
+        scores: dict[str, dict] = {}
         checks = load_checks()
-        for i, r in enumerate(ranking[:cfg.mom_keep_rank]):
-            if slots <= 0 or len(broker.positions) >= cfg.mom_positions:
-                break
+        pool = ranking[:cfg.mom_pool]
+        eligible = []
+        for j, r in enumerate(pool):
             sym = r["symbol"]
             snap = snaps.get(sym)
             if sym in broker.positions:
-                slots -= 1
                 continue
             if sym in d["cooldown"]:
-                slots -= 1
                 status[sym] = ["pause", "Pause nach Stop"]
                 continue
             if not snap or not snap.tradable:
-                slots -= 1
                 status[sym] = ["closed", "Börse gerade zu"]
                 continue
+            n = snap.news
+            news = n.score if n.n_headlines else 0.0
+            sc = combined_score(cfg, j, len(pool), news)
+            scores[sym] = {"news": round(news, 3), "score": round(sc, 3), "ai": n.analyst == "claude", "n": n.n_headlines}
             verdict, text = buy_verdict(snap, d, checks, now)
-            status[sym] = [verdict, text[:240]]
             if verdict == "veto":
                 _note_veto(d, r, snap, now, text)
-                continue                    # kein Platz verbraucht: der nächste Wert rückt nach
-            if verdict == "hold":
-                continue                    # KI: „jetzt nicht“ (z. B. Zahlen stehen an) – der nächste rückt nach
-            slots -= 1
-            if verdict == "wait":
+            elif verdict == "ok" and n.n_headlines and news < cfg.mom_news_min:
+                verdict, text = "weak", f"Nachrichtenlage {news:+.2f} – für einen Kauf nicht gut genug ({n.summary[:120]})"
+            status[sym] = [verdict, text[:240]]
+            if verdict == "ok":
+                eligible.append((sc, j, r, snap))
+        eligible.sort(key=lambda e: -e[0])
+        # 3) Kaufen: bestes Gesamtbild zuerst, höchstens mom_positions, immer mom_cash_reserve Cash übrig lassen
+        pause = in_buy_pause(cfg, now)
+        budget = equity * (1 - cfg.mom_cash_reserve)
+        invested = sum(p["margin"] for p in broker.positions.values())
+        for sc, j, r, snap in eligible:
+            sym = r["symbol"]
+            if pause:
+                status[sym] = ["timepause", f"Kaufpause {cfg.mom_buy_pause} Uhr (US-Daten, US-Börsenstart) – danach"]
+                continue
+            if len(broker.positions) >= cfg.mom_positions:
+                status[sym] = ["full", "alle Plätze belegt"]
                 continue
             isin = (cfg.isins or {}).get(sym)
             if cfg.real_products and isin:
@@ -323,20 +361,27 @@ def run(broker, cfg: Config, snaps: dict) -> None:
                     continue    # Scheinsuche im nächsten Durchlauf
             product = _real_product(cfg, snap, "long", searches) if cfg.real_products else None
             lev = product["leverage"] if product else 1.0
-            margin = min(equity / cfg.mom_positions, (broker.cash - cfg.fee_fixed - 0.5) / (1 + cfg.fee_pct * lev))
+            margin = min(budget / cfg.mom_positions, budget - invested,
+                         (broker.cash - cfg.fee_fixed - 0.5) / (1 + cfg.fee_pct * lev))
             if margin < 50:
+                status[sym] = ["cash", f"Cash-Reserve ({cfg.mom_cash_reserve:.0%}) bleibt – kein Geld für eine weitere Position"]
                 continue
             via = (f"via {product['name']} ({product['isin']}), KO {product['barrier']:g} {product.get('currency', '')}"
                    if product else f"Aktie direkt (kein passender Schein mit Hebel um {cfg.product_target_leverage:g})")
             n = snap.news
             if broker.open(sym, "long", snap.price, margin, lev,
-                           f"Momentum Platz {i + 1}: {r['mom']:+.0%} in 6 Monaten · {lev:g}x {via} · Nachrichten {n.score:+.2f}",
-                           product=product, entry={"strategy": "momentum", "mom": r["mom"], "rank": i + 1, "lev": lev,
-                                                   "news": round(n.score, 3), "n_news": n.n_headlines, "analyst": n.analyst,
-                                                   "provider": n.provider, "news_summary": n.summary[:160],
+                           f"Momentum Platz {j + 1} ({r['mom']:+.0%} in 6 Monaten), Nachrichten {n.score:+.2f}, "
+                           f"Gesamtwertung {sc:.2f} · {lev:g}x {via}",
+                           product=product, entry={"strategy": "momentum", "mom": r["mom"], "rank": j + 1, "lev": lev,
+                                                   "score": round(sc, 3), "news": round(n.score, 3), "n_news": n.n_headlines,
+                                                   "analyst": n.analyst, "provider": n.provider,
+                                                   "news_summary": n.summary[:160],
                                                    "check": (checks.get(sym) or {}).get("reason", "")[:200]}):
                 d["news_wait"].pop(sym, None)
+                invested += margin
+                status[sym] = ["bought", "gekauft"]
         d["status"] = status
+        d["scores"] = scores
         d["news_wait"] = {s: t for s, t in d["news_wait"].items() if status.get(s, [""])[0] == "wait"}
         d["check_wait"] = {s: t for s, t in d["check_wait"].items() if status.get(s, [""])[0] == "wait"}
     # übersprungene Käufe weiter beobachten: wie liefen sie seitdem?
@@ -359,8 +404,6 @@ def _status(d: dict, sym: str, rank: int, held: set[str], cfg: Config, now: date
         return st
     if veto:
         return ["veto", veto["why"]]
-    if rank <= cfg.mom_positions and len(held) >= cfg.mom_positions:
-        return ["full", "alle Plätze belegt – gekauft wird, sobald ein Wert die besten " f"{cfg.mom_keep_rank} verlässt"]
     return st
 
 
@@ -376,14 +419,18 @@ def view(cfg: Config, held: set[str]) -> dict:
     return {"time": d.get("time"), "n": d.get("n", 0),
             "ranking": [{**r, "rank": i + 1, "held": r["symbol"] in held, "status": _status(d, r["symbol"], i + 1, held, cfg, now),
                          "check": {k: (checks.get(r["symbol"]) or {}).get(k) for k in ("decision", "reason", "provider", "time", "earnings")}
-                         if fresh(checks.get(r["symbol"]) or {}) else None}
-                        for i, r in enumerate(d["ranking"][:10])],
+                         if fresh(checks.get(r["symbol"]) or {}) else None,
+                         **{k: (d.get("scores", {}).get(r["symbol"]) or {}).get(k) for k in ("news", "score", "ai")}}
+                        for i, r in enumerate(d["ranking"][:cfg.mom_pool])],
             "checking": _checking["on"],
             "cooldown": sorted(d["cooldown"]),
             "vetoes": vetoes[-6:][::-1],
             "filter": {"n": len(judged), "avg": sum(v["change"] for v in judged) / len(judged) if judged else None,
                        "threshold": NEWS_VETO},
             "rules": {"positions": cfg.mom_positions, "keep": cfg.mom_keep_rank, "stop": cfg.stop_loss_pct,
+                      "pool": cfg.mom_pool, "news_weight": cfg.mom_news_weight, "news_min": cfg.mom_news_min,
+                      "news_exit": cfg.mom_news_exit, "reserve": cfg.mom_cash_reserve, "pause": cfg.mom_buy_pause,
+                      "paused": in_buy_pause(cfg, now),
                       "stop_product": min(cfg.stop_loss_pct, cfg.product_stop_share / cfg.product_target_leverage),
                       "trailing": cfg.trailing_stop_pct, "lev": [cfg.product_min_leverage, cfg.product_target_leverage,
                                                                  cfg.product_max_leverage]}}
