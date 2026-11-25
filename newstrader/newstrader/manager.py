@@ -77,6 +77,15 @@ def _qty(sym: str, amount: float, price: float) -> float:
     return float(math.floor(amount / price + 1e-9))  # 1999,9999… / 100 soll 20 ergeben, nicht 19
 
 
+def _qty_up(sym: str, amount: float, price: float) -> float:
+    """Stückzahl, die mindestens `amount` € ergibt (für Verkäufe, die eine Cash-Lücke schließen sollen)."""
+    if price <= 0:
+        return 0.0
+    if is_crypto(sym):
+        return math.ceil(amount / price * 1e4 - 1e-6) / 1e4
+    return float(math.ceil(amount / price - 1e-9))
+
+
 def _action(kind: str, side: str, sym: str, name: str, qty: float, price: float, reason: str, now: datetime) -> dict:
     return {"id": uuid.uuid4().hex[:10], "time": now.isoformat(timespec="seconds"), "kind": kind, "side": side,
             "symbol": sym, "name": name, "qty": qty, "price": round(price, 4), "value": round(qty * price, 2),
@@ -397,12 +406,14 @@ def _push_actions(cfg: Config, actions: list[dict], notify) -> None:
             lines.append(f"🟢 Kaufen: {q} × {a['name']} zu ca. {_fmt(a['price'])} € (≈ {_fmt(a['value'], 0)} €), "
                          f"Stop-Loss {_fmt(stop)} €")
         else:
-            label = {"stop": "Stop-Loss", "trim": "Teilverkauf", "rapid": "Kurssturz"}.get(a["kind"], "Verkaufen")
+            label = {"stop": "Stop-Loss", "trim": "Teilverkauf", "rapid": "Kurssturz",
+                     "cash": "Cash für Hebel-Trade"}.get(a["kind"], "Verkaufen")
             lines.append(f"🔴 {label}: {q} × {a['name']} zu ca. {_fmt(a['price'])} € (≈ {_fmt(a['value'], 0)} €)")
     if len(actions) > 8:
         lines.append(f"… und {len(actions) - 8} weitere")
     title = "📋 Depot: " + ("Aufbau – bitte kaufen" if actions[0]["kind"] == "setup" else
-                                "Stop-Loss" if all(a["kind"] == "stop" for a in actions) else "Empfehlungen")
+                                "Stop-Loss" if all(a["kind"] == "stop" for a in actions) else
+                                "Cash für den Hebel-Trade" if all(a["kind"] == "cash" for a in actions) else "Empfehlungen")
     from .mydepot import tr_url
     link = tr_url(getattr(cfg, "isins", {}).get(actions[0]["symbol"]))
     text = "\n".join(lines) + "\nIm Depot als ausgeführt gebucht – anders gemacht? In der App anpassen."
@@ -450,6 +461,60 @@ def recently_sold(state: dict, now: datetime) -> set[str]:
         if days and now - datetime.fromisoformat(a["time"]) < timedelta(days=days):
             out.add(a["symbol"])
     return out
+
+
+def recently_bought(state: dict, now: datetime, days: int = 3) -> set[str]:
+    """Gerade erst (empfohlen oder selbst) gekauft – nicht gleich wieder für Cash verkaufen."""
+    return {a["symbol"] for a in state.get("actions", []) if a["side"] == "buy" and a.get("status") != "abgelehnt"
+            and now - datetime.fromisoformat(a["time"]) < timedelta(days=days)}
+
+
+TR_CASH_MAX_AGE_H = 3
+
+
+def available_cash(cash_model: float) -> tuple[float, float | None]:
+    """Cash, das für den Hebel-Trade wirklich da ist: Musterdepot – und, wenn Trade Republic frisch abgeglichen ist,
+    höchstens das echte TR-Guthaben (Hebel-Scheine selbst tauchen im Musterdepot nicht auf)."""
+    try:
+        from . import traderepublic
+        d = traderepublic._load()
+        last = d.get("last_ok")
+        if d.get("connected") and d.get("cash") is not None and last and \
+                datetime.now(timezone.utc) - datetime.fromisoformat(last) < timedelta(hours=TR_CASH_MAX_AGE_H):
+            return min(cash_model, float(d["cash"])), float(d["cash"])
+    except Exception:  # noqa: BLE001
+        pass
+    return cash_model, None
+
+
+_last_cash_plan: dict = {}
+
+
+def cash_for_spec(cfg: Config, held: dict[str, dict], scores: dict[str, float], prices: dict[str, float], cash_model: float,
+                  total: float, state: dict, now: datetime) -> list[dict]:
+    """Cash-Planung für den Hebel-Vorschlag: Bedarf ermitteln, mit vorhandenem Cash vergleichen, bei einer Lücke die
+    schwächste Position verkleinern. Merkt sich das Ergebnis für die Oberfläche."""
+    from . import allocator as A, spekulation
+    plan = spekulation.cash_plan(cfg, total)
+    avail, tr_cash = available_cash(cash_model)
+    day = plan.get("for_day")
+    when = ""
+    if day:
+        try:
+            when = " am " + datetime.fromisoformat(day).strftime("%d.%m.")
+        except ValueError:
+            pass
+    sells = A.raise_cash(held, scores, prices, avail, plan["need"], _qty_up, protect=recently_bought(state, now), why=when)
+    freed = sum(t["qty"] * t["price"] for t in sells)
+    _last_cash_plan.clear()
+    _last_cash_plan.update(plan, cash_model=round(cash_model, 2), cash_tr=tr_cash, available=round(avail, 2),
+                           short=round(max(0.0, plan["need"] - avail), 2), freed=round(freed, 2),
+                           sells=[t["symbol"] for t in sells], time=now.isoformat(timespec="minutes"))
+    return sells
+
+
+def cash_plan_view(state: dict) -> dict | None:
+    return dict(_last_cash_plan) or state.get("cash_plan")
 
 
 def due_slot(cfg: Config, state: dict, now: datetime) -> str | None:
@@ -505,6 +570,7 @@ def plan_holistic(cfg: Config, positions: list[dict], signals: dict[str, dict], 
     sectors = {s: (meta.get(s) or {}).get("sector") or "?" for s in universe}
     regime = A.market_regime(history_eur(cfg, "EUNL.DE", "2y"), st.cash)
     _last_regime.update(state=regime.state, text=regime.text, invest=regime.invest, time=now.isoformat(timespec="minutes"))
+    state["regime"] = dict(_last_regime)      # übersteht Neustarts (wird mit der Entscheidung gespeichert)
     target, why = A.plan_targets({s: h["qty"] * h["price"] / total for s, h in held.items()},
                                  {s: sig[s] for s in universe if s in sig}, vols, sectors, st,
                                  state.get("style", "ausgewogen"), rules, regime, is_crypto,
@@ -513,6 +579,12 @@ def plan_holistic(cfg: Config, positions: list[dict], signals: dict[str, dict], 
     from . import spekulation
     spec_reserve = spekulation.cash_needed(cfg, total)   # Cash für den nächsten Hebel-Trade freihalten
     trades = A.plan_trades(held, target, prices, total, cash, regime, st, why, _qty, extra_reserve=spec_reserve)
+    # Cash-Planung: reicht das Cash (nach diesen Aufträgen) für den nächsten Hebel-Trade? Sonst schwächste Position verkleinern
+    selling = {t["symbol"] for t in trades if t["side"] == "sell"}
+    cash_after = cash + sum(t["qty"] * t["price"] * (1 if t["side"] == "sell" else -1) for t in trades)
+    trades += cash_for_spec(cfg, {s: {**h, "price": prices.get(s) or h["price"]} for s, h in held.items() if s not in selling},
+                            {s: v["score"] for s, v in signals.items() if v.get("score") is not None}, prices, cash_after,
+                            total, state, now)
     out = []
     for t in trades:
         s = signals.get(t["symbol"], {})
@@ -540,8 +612,13 @@ def decide(cfg: Config, notify, names: dict, prices: dict[str, float], key: str)
     cash = cash_of(state["start_capital"], pf.load_txns("model"))
     plan = plan_holistic(cfg, positions, signals, cash, st, state, names, now)
     acts = _execute(cfg, plan, notify)
+    regime_now = state.get("regime")
     with _lock:
         state = load_state()
+        if regime_now:
+            state["regime"] = regime_now
+        if _last_cash_plan:
+            state["cash_plan"] = dict(_last_cash_plan)
         state.setdefault("decisions", {})[key] = len(acts)
         state["decisions"] = dict(sorted(state["decisions"].items())[-200:])
         save_state(state)
@@ -564,7 +641,47 @@ def tick(cfg: Config, notify, names: dict, live_prices) -> list[dict]:
     slot = due_slot(cfg, state, now)
     if slot:
         acts += decide(cfg, notify, names, prices, slot)
+    acts += cash_check_after_plan(cfg, notify, names)
     return acts
+
+
+def cash_check_after_plan(cfg: Config, notify, names: dict) -> list[dict]:
+    """Steht der Hebel-Plan für den nächsten Handelstag fest (22:30), einmal prüfen, ob das Cash reicht –
+    sonst sofort eine Verkaufsempfehlung, damit bis 9 Uhr Zeit zum Umsetzen bleibt."""
+    from . import spekulation
+    state = load_state()
+    if not state.get("start_capital"):
+        return []
+    d = spekulation.load()
+    if not d["enabled"]:
+        return []
+    today = datetime.now(pf.BERLIN).date()
+    plan = None
+    for day in (today.isoformat(), spekulation.next_trading_day(today)):
+        p = d["plans"].get(day)
+        if p and not p.get("published") and not p.get("manual"):
+            plan = p
+    if not plan or state.get("cash_checked") == plan.get("created"):
+        return []
+    now = datetime.now(timezone.utc)
+    signals = signals_from_cycle()
+    positions, _ = positions_now(cfg, {s: v["price"] for s, v in signals.items()})
+    held = {p["symbol"]: {"qty": p["qty"], "price": p["price"] or p["avg_price"]} for p in positions if p["qty"] > 0}
+    cash = cash_of(state["start_capital"], pf.load_txns("model"))
+    total = cash + sum(h["qty"] * h["price"] for h in held.values())
+    trades = cash_for_spec(cfg, held, {s: v["score"] for s, v in signals.items() if v.get("score") is not None},
+                           {s: h["price"] for s, h in held.items()}, cash, total, state, now)
+    acts = [_action("cash", t["side"], t["symbol"], names.get(t["symbol"], t["symbol"]), t["qty"], t["price"],
+                    t["reason"] + " · bitte vor 9 Uhr verkaufen", now) for t in trades]
+    done = _execute(cfg, acts, notify)
+    with _lock:
+        state = load_state()
+        state["cash_checked"] = plan.get("created")
+        state["cash_plan"] = dict(_last_cash_plan)
+        save_state(state)
+    log.info("Cash-Planung nach dem Hebel-Plan: Bedarf %.0f €, verfügbar %.0f € – %s", _last_cash_plan.get("need", 0),
+             _last_cash_plan.get("available", 0), f"{len(done)} Verkauf/Verkäufe" if done else "reicht")
+    return done
 
 
 # --------------------------------------------------------------------------- „Jetzt prüfen“

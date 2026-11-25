@@ -383,17 +383,38 @@ def stake_for(cfg: Config, idea: dict, depot: float, lev: float | None = None) -
     return depot * cfg.spec_risk_pct * grade(idea.get("conviction"))[1] / max(loss, 0.05)
 
 
-def cash_needed(cfg: Config, depot: float) -> float:
-    """Wie viel Cash das Portfolio für den nächsten Hebel-Trade freihalten soll (0, wenn ausgeschaltet)."""
+def cash_plan(cfg: Config, depot: float) -> dict:
+    """Wie viel Cash das Portfolio für den nächsten Hebel-Trade braucht – und woher die Zahl kommt.
+
+    1. fester (oder als Vorschau erstellter) Plan, noch nicht veröffentlicht -> sein Einsatz
+    2. sonst der führende Kandidat der Vorauswahl für den nächsten Handelstag
+    3. sonst der mittlere Einsatz der letzten Vorschläge, ganz ohne Erfahrung 3 % des Depots
+    """
     d = load()
     if not d["enabled"]:
-        return 0.0
+        return {"need": 0.0, "source": "aus", "for_day": None}
     today = datetime.now(pf.BERLIN).date()
-    for day in (today.isoformat(), next_trading_day(today)):
+    nxt = next_trading_day(today)
+    for day in (today.isoformat(), nxt):
         plan = d["plans"].get(day)
         if plan and not plan.get("published"):
-            return stake_for(cfg, plan["idea"], depot) if plan.get("idea") else 0.0
-    return depot * 0.05   # noch kein Plan: grob 5 % des Depots
+            if not plan.get("idea"):
+                return {"need": 0.0, "source": "Plan: kein Trade", "for_day": day, "final": not plan.get("manual")}
+            return {"need": round(stake_for(cfg, plan["idea"], depot), 2), "source": f"Plan {plan['idea'].get('name') or plan['idea'].get('symbol', '')}".strip(),
+                    "for_day": day, "final": not plan.get("manual"), "plan_created": plan.get("created")}
+    w = (d.get("watch") or {}).get(nxt) or {}
+    lead = (w.get("items") or {}).get(w.get("leader") or "")
+    if lead and lead.get("ok") and lead.get("stop"):
+        return {"need": round(stake_for(cfg, lead, depot), 2), "source": f"Vorauswahl: {lead.get('name')}", "for_day": nxt}
+    stakes = sorted(float(h["stake"]) for h in d["history"][-10:] if h.get("stake"))
+    if stakes:
+        return {"need": stakes[len(stakes) // 2], "source": "Schnitt der letzten Vorschläge", "for_day": nxt}
+    return {"need": round(depot * 0.03, 2), "source": "Schätzung (3 % des Depots)", "for_day": nxt}
+
+
+def cash_needed(cfg: Config, depot: float) -> float:
+    """Wie viel Cash das Portfolio für den nächsten Hebel-Trade freihalten soll (0, wenn ausgeschaltet)."""
+    return cash_plan(cfg, depot)["need"]
 
 
 # --------------------------------------------------------------------------- Veröffentlichen (09:00)

@@ -169,3 +169,36 @@ def plan_trades(held: dict[str, dict], target: dict[str, float], prices: dict[st
                     + f" ({target[sym]:.0%} Ziel)"})
         cash_left -= q * px
     return out
+
+
+CASH_MIN_GAP = 50.0         # kleinere Lücken: lieber etwas kleiner in den Hebel-Trade als extra verkaufen
+DUST = 150.0                # Restposition darunter -> ganz verkaufen
+
+
+def raise_cash(held: dict[str, dict], scores: dict[str, float], prices: dict[str, float], cash: float, need: float,
+               qty_up, protect=(), why: str = "") -> list[dict]:
+    """Fehlt Cash für den geplanten Hebel-Trade: die Position mit dem schwächsten Signal (nicht gerade erst gekauft)
+    gerade so weit verkleinern, dass es reicht. held: Symbol -> {qty, price}. Gibt Verkaufsaufträge (kind „cash“)."""
+    short = need - cash
+    if need <= 0 or short < max(CASH_MIN_GAP, 0.25 * need):
+        return []
+    want = max(MIN_ORDER, short * 1.1)                     # etwas Puffer für Kursschwankung und Gebühr
+    order = sorted((s for s in held if (prices.get(s) or held[s].get("price")) and held[s]["qty"] > 0),
+                   key=lambda s: (s in protect, scores.get(s, 0.0)))
+    out = []
+    for sym in order:
+        if want <= 0:
+            break
+        px = prices.get(sym) or held[sym]["price"]
+        qty = held[sym]["qty"]
+        q = min(qty, qty_up(sym, want, px))
+        if (qty - q) * px < DUST:
+            q = qty
+        if q <= 0:
+            continue
+        out.append({"side": "sell", "symbol": sym, "qty": q, "price": px, "kind": "cash",
+                    "reason": f"Cash für den Hebel-Vorschlag{why}: es fehlen ca. {short:.0f} € – "
+                              f"{'ganz' if q >= qty else 'teilweise'} verkauft wird der Wert mit dem schwächsten Signal "
+                              f"({scores.get(sym, 0.0):+.2f})"})
+        want -= q * px
+    return out

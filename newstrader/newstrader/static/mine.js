@@ -170,7 +170,8 @@ function createPortfolioView(opts) {
   }
 
   // ------------------------------------------------------------------ Depot: Empfehlungen
-  const KIND = { setup: "Aufbau", signal: "Signal", stop: "Stop-Loss", trim: "Teilverkauf", rapid: "Kurssturz", manual: "Eigene" };
+  const KIND = { setup: "Aufbau", signal: "Signal", stop: "Stop-Loss", trim: "Teilverkauf", rapid: "Kurssturz", manual: "Eigene",
+                 cash: "Cash für Hebel-Trade", rebalance: "Nachkauf" };
   const STATUS = { angenommen: "⏳ unbestätigt", "bestätigt": "✓ bestätigt", angepasst: "✓ bestätigt (angepasst)", abgelehnt: "✕ nicht gemacht", eigene: "✓ eigene Buchung" };
   const STATUS_CLS = { angenommen: "warn", "bestätigt": "ok", angepasst: "ok", abgelehnt: "", eigene: "ok" };
   const unconfirmed = (sym) => (PF.state?.actions || []).filter((a) => a.status === "angenommen" && (!sym || a.symbol === sym));
@@ -525,7 +526,20 @@ function createPortfolioView(opts) {
       : "Plan steht um 22:30 Uhr";
     return `<section class="card" style="margin-bottom:14px"><div class="todo-head"><h2>🎲 Spekulation</h2><span class="name">${stat}</span></div>
       <div style="padding:10px 16px 14px;display:flex;flex-direction:column;gap:10px">${body}
-        ${progress}<div class="name">Nächster Handelstag: ${next}</div>${watchList(sp.watch)}</div></section>`;
+        ${progress}<div class="name">Nächster Handelstag: ${next}</div>${cashLine()}${watchList(sp.watch)}</div></section>`;
+  }
+  // Cash-Planung für den Hebel-Trade (wird bei jeder Prüfung und nach dem 22:30-Plan neu gerechnet)
+  function cashLine() {
+    const c = PF.state?.cash_plan;
+    if (!c || !c.need) return "";
+    const ok = !c.short;
+    const tr = c.cash_tr != null ? ` · bei Trade Republic ${eur(c.cash_tr)}` : "";
+    const fix = c.sells?.length ? ` · gedeckt durch Teilverkauf ${c.sells.map(esc).join(", ")} (≈ ${eur(c.freed)})`
+      : !ok ? " · Lücke zu klein für einen Extra-Verkauf – Einsatz dann etwas kleiner" : "";
+    return `<div class="kv" title="Stand ${c.time ? dt(c.time) : "–"} · ${esc(c.source || "")}"><span>💶 Cash-Plan: Einsatz ~${eur(c.need)}
+        <span class="name">(${esc(c.source || "")})</span></span>
+      <b class="${ok || c.sells?.length ? "up" : "down"}">${ok ? "✓ gedeckt" : c.sells?.length ? "✓ wird frei" : "⚠ fehlt " + eur(c.short)}</b></div>
+      <div class="name" style="margin-top:-6px">Verfügbar ${eur(c.available)}${tr}${fix}</div>`;
   }
   function watchList(w) {
     if (!w || !w.items?.length) return "";

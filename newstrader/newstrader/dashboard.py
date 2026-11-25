@@ -369,7 +369,8 @@ def make_handler(cfg: Config, in_process: bool):
                     "check": manager.check_status(),
                     "broker": __import__("newstrader.traderepublic", fromlist=["status"]).status(),
                     "spec": __import__("newstrader.spekulation", fromlist=["status"]).status(),
-                    "regime": manager._last_regime or None,
+                    "regime": manager._last_regime or state.get("regime") or None,
+                    "cash_plan": manager.cash_plan_view(state),
                     "review": __import__("newstrader.review", fromlist=["load"]).load() or None,
                     "pf_learning": __import__("newstrader.pf_learning", fromlist=["summary"]).summary(),
                     "weekday": now.weekday()})
