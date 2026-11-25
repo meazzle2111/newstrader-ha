@@ -374,6 +374,7 @@ def run_once(cfg: Config, broker: PaperBroker, analyst: NewsAnalyst) -> None:
     broker.on_close = lrn.record
     if broker.cfg.zocker_strategy == "momentum":
         from . import momentum
+        momentum.start_checks(broker.cfg, analyst, set(broker.positions))   # Kauf-Gutachten im Hintergrund
         momentum.run(broker, broker.cfg, snaps)
     else:
         close_legacy_positions(broker, snaps)

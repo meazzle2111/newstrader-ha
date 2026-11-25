@@ -378,6 +378,8 @@ button.busy { opacity: .75; cursor: progress; }
 .mtag { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
 .mtag.kaufen { color: var(--ink); font-weight: 600; }
 .mtag.veto { color: var(--bad-text); font-weight: 600; }
+.mcheck { white-space: normal; font-size: 12px; color: var(--ink-2); margin-top: 2px; line-height: 1.4; }
+.mcheck.no { color: var(--bad-text); }
 .mrow.held .mtag { color: var(--series-1); font-weight: 600; }
 .mval { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
 .ztr { max-width: none; margin-top: 5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -1325,7 +1327,10 @@ function renderZockerSettings(s) {
       <div><b>Positionen:</b> höchstens ${R.positions}, je ein Drittel des Kontos – wenige, große Wetten.</div>
       <div><b>Hebel:</b> echte Knock-out-Scheine von Trade Republic mit Hebel ${nf(1).format(R.lev[0])}–${nf(1).format(R.lev[2])}x
         (Ziel ${nf(0).format(R.lev[1])}x, Knock-out-Schwelle rund ${nf(0).format(100 / R.lev[1])} % entfernt). Gibt es keinen, die Aktie selbst.</div>
-      <div><b>Nachrichten-Filter:</b> Vor jedem Kauf prüft die KI die Nachrichtenlage. Ist sie klar negativ (Bewertung
+      <div><b>Kaufprüfung:</b> Bevor gekauft wird, schreibt die KI ein Gutachten zu genau diesem Kauf: Kommt der Anstieg nur von einem
+        Übernahmeangebot? Gab es eine Gewinnwarnung oder Herabstufung? Steht ein Ereignis mit Kurslücken-Risiko an? Ist der Trend schon
+        gebrochen? Kurz vor Quartalszahlen wird grundsätzlich nicht gekauft. Bei „nicht kaufen“ oder „jetzt nicht“ rückt der nächste nach.</div>
+      <div><b>Nachrichten-Filter:</b> Zusätzlich prüft die KI die Nachrichtenlage. Ist sie klar negativ (Bewertung
         ${M.filter ? signed(M.filter.threshold, 2) : "−0,30"} oder schlechter, z. B. Gewinnwarnung, Klage, Herabstufung), wird der Wert
         übersprungen und der nächste rückt nach. Übersprungene Werte werden weiter beobachtet.</div>
       <div><b>Verkauf:</b> wenn der Wert nicht mehr unter den besten ${R.keep} ist, oder beim Stop: bei Scheinen
@@ -1343,14 +1348,17 @@ function renderMomentum(s) {
   $("momCard").classList.toggle("hidden", !M);
   if (!M) return;
   const R = M.rules;
-  const ST = { veto: ["📰 übersprungen", "veto"], wait: ["⏳ prüft Nachrichten", ""], ok: ["✓ Nachrichten ok", "kaufen"],
+  const ST = { veto: ["✕ nicht kaufen", "veto"], wait: ["⏳ wird geprüft", ""], ok: ["✓ geprüft", "kaufen"], hold: ["⏸ jetzt nicht", ""],
                pause: ["Pause nach Stop", ""], closed: ["Börse zu", ""], full: ["Plätze belegt", ""] };
   const rows = M.ranking.map((r) => {
     const zone = r.rank <= R.positions ? "kaufen" : r.rank <= R.keep ? "halten" : "";
     const st = !r.held && r.status ? ST[r.status[0]] : null;
     const tag = r.held ? "im Depot" : st ? st[0] : zone === "kaufen" ? "wird gekauft" : zone === "halten" ? "Halte-Zone" : "";
+    const c = r.check;
+    const ck = c && r.rank <= R.keep ? `<div class="mcheck ${c.decision === "kaufen" ? "ok" : c.decision === "nicht kaufen" ? "no" : ""}">🧠 ${esc(c.decision)}: ${esc(c.reason || "")}
+        <span class="name">· ${esc(c.provider || "")}, ${ago(c.time)}</span></div>` : "";
     return `<div class="mrow${r.held ? " held" : ""}" title="${esc(r.status ? r.status[1] : "")}"><span class="mrank">${r.rank}</span>
-      <div class="mname"><b>${esc(r.name)}</b> <span class="name">${esc(r.symbol)}</span></div>
+      <div class="mname"><b>${esc(r.name)}</b> <span class="name">${esc(r.symbol)}</span>${ck}</div>
       <span class="mtag ${st ? st[1] : zone}">${tag}</span>
       <span class="mval up">${signed(r.mom * 100, 0)} %</span></div>`;
   }).join("");
@@ -1365,6 +1373,7 @@ function renderMomentum(s) {
       ${F.avg < 0 ? "der Filter hat Verluste vermieden." : "der Filter hat eher Gewinne gekostet."}` : "Aussagekräftig wird das nach ein paar Tagen."}</div>` : "";
   $("momList").innerHTML = (rows || `<div class="empty">Rangliste wird beim nächsten Durchlauf berechnet.</div>`) + vet;
   $("momHint").textContent = `Kursveränderung der letzten 6 Monate (ohne letzte Woche) · ${M.n} Werte mit positivem Trend`
+    + (M.checking ? " · KI prüft gerade Kandidaten …" : "")
     + (M.time ? ` · berechnet ${ago(M.time)}` : "") + (M.cooldown.length ? ` · Pause nach Stop: ${M.cooldown.join(", ")}` : "");
 }
 
