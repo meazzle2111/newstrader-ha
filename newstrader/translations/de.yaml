@@ -1,0 +1,19 @@
+configuration:
+  gemini_api_key:
+    name: Gemini-API-Schlüssel
+    description: >-
+      Kostenloser Schlüssel aus Google AI Studio (aistudio.google.com → „Get API key“). Wird bevorzugt
+      genutzt; Claude springt nur ein, wenn Gemini am Limit ist. Leer = nur Claude.
+  claude_token:
+    name: Claude-Token
+    description: >-
+      Langlebiger Anmelde-Schlüssel für dein Claude-Abo. Auf dem Mac erzeugen mit
+      "~/.local/bin/claude setup-token" und hier einfügen. Leer = Nachrichten nur mit dem Wörterbuch bewerten.
+  notify_service:
+    name: Benachrichtigungsdienst
+    description: >-
+      Für Push-Mitteilungen der Depot-Signale, z. B. "mobile_app_dein_iphone" (siehe Entwicklerwerkzeuge → Aktionen → notify).
+      Leer = Benachrichtigung in Home Assistant (Glocke).
+  trading_mode:
+    name: Handelsmodus (Spielgeld)
+    description: cash = nur Long ohne Hebel, leverage = Long & Short mit Hebel.

@@ -1,0 +1,10 @@
+yfinance==1.8.0
+curl_cffi==0.17.0
+feedparser==6.0.14
+anthropic==2.12.0
+pydantic==2.14.4
+pandas==3.1.1
+numpy==2.5.5
+requests==2.34.2
+tzdata
+pytr==0.4.10
