@@ -716,6 +716,7 @@ function createPortfolioView(opts) {
     root().querySelectorAll("[data-sub]").forEach((b) => b.classList.toggle("on", b.dataset.sub === k));
     if (k === "analyse") drawPerf();  // Grafik braucht die sichtbare Breite
     if (k === "overview" && PF.values) drawValue();
+    if (k === "overview") openPos.forEach((sym) => drawPosChart(sym));   // Charts brauchen die sichtbare Breite
     if (!quiet) window.scrollTo({ top: 0 });
   }
 
