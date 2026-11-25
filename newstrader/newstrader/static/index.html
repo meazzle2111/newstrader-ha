@@ -345,6 +345,19 @@ button.busy { opacity: .75; cursor: progress; }
 .pbar { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; margin-top: 4px; }
 .pbar > i { display: block; height: 100%; background: var(--series-1); transition: width .4s; }
 .tr-link { text-align: center; text-decoration: none; display: block; padding: 8px 12px !important; font-size: 13px !important; }
+
+/* Zocker: Grafik und Positionen untereinander, Positionen als Liste */
+#tabBot .two { grid-template-columns: 1fr; }
+.zpos-list { display: flex; flex-direction: column; }
+.zpos { padding: 12px 16px; border-top: 1px solid var(--grid); cursor: pointer; }
+.zpos:first-child { border-top: 0; }
+.zpos:hover { background: var(--surface-2); }
+.zrow { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.zr { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.zmeta { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--ink-2); margin-top: 6px; font-variant-numeric: tabular-nums; }
+.zmeta b { color: var(--ink); font-weight: 600; }
+.zprod { font-size: 12.5px; margin-top: 4px; }
+.zprod a { color: var(--ink); }
 @media (max-width: 420px) { .subnav { gap: 3px; } .subnav button { padding: 7px 9px; font-size: 13px; } }
 @media (max-width: 600px) { .todo-list { grid-template-columns: 1fr; } .value-foot { flex-direction: column; align-items: stretch; } .value-foot .check { justify-content: space-between; } }
 
@@ -732,25 +745,33 @@ function renderChart(s) {
 function renderPositions(s) {
   const r = s.rules;
   const lev = r.mode === "leverage";
-  $("posHint").textContent = `Stop-Loss bei ${nf(0).format(r.stop_loss * 100)} % Kursbewegung gegen die Position, Trailing-Stop ${nf(0).format(r.trailing * 100)} % vom besten Kurs`
-    + (lev ? ` · Zwangsschließung bei ${nf(0).format(r.closeout * 100)} % Margin-Verlust` : "");
+  const real = s.positions.some((p) => p.product);
+  $("posHint").textContent = real
+    ? `Echte Knock-out-Scheine von Trade Republic (Hebel um 12x). Der Stop liegt vor der Knock-out-Schwelle${r.profile === "action" ? ", ab +4 % Plus wird er eng (3 %) nachgezogen" : ""}. Wird die Schwelle erreicht, ist der Einsatz weg.`
+    : `Stop-Loss bei ${nf(0).format(r.stop_loss * 100)} % gegen die Position, Trailing-Stop ${nf(0).format(r.trailing * 100)} % vom besten Kurs`;
   if (!s.positions.length) {
-    $("positions").innerHTML = `<div class="empty">Keine offenen Positionen – der Bot wartet auf ein Signal über ${signed(r.buy)}${r.shorts ? ` (Long) oder unter ${signed(r.short)} (Short)` : ""}.</div>`;
+    $("positions").innerHTML = `<div class="empty">Keine offenen Positionen – der Bot wartet auf ein Signal über ${signed(r.zocker_buy ?? r.buy)}${r.shorts ? ` (Long) oder unter ${signed(r.short)} (Short)` : ""}.</div>`;
     return;
   }
-  $("positions").innerHTML = `<table>
-    <tr><th>Wert</th><th class="num">${lev ? "Margin / Volumen" : "Bestand"}</th><th class="num">Einstand / Kurs</th><th class="num">G/V</th><th class="num">Stop${lev ? " / Liq./KO" : ""}</th></tr>
-    ${s.positions.map((p) => `<tr class="pick" data-sym="${esc(p.symbol)}" title="Im Kurs-Chart anzeigen">
-      <td><div class="sym">${esc(p.symbol)} <span class="tag ${p.side}">${p.side === "short" ? "Short" : "Long"}${p.leverage > 1 ? " " + nf(1).format(p.leverage).replace(",0", "") + "x" : ""}</span></div>
-          <div class="name">${esc(p.name)} · seit ${dt(p.opened)}</div>
-          ${p.product ? `<div class="name">📄 <a href="https://app.traderepublic.com/instrument/${encodeURIComponent(p.product.isin)}" target="_blank" rel="noopener">${esc(p.product.name)}</a> · ${esc(p.product.isin)} · KO ${nf(2).format(p.product.barrier)} ${esc(p.product.currency || "")}</div>` : ""}</td>
-      <td class="num">${lev ? `${money(p.margin, 0)}<div class="name">${money(p.exposure, 0)}</div>` : money(p.value, 0)}</td>
-      <td class="num">${nf(2).format(p.avg_price)}<div class="name">${nf(2).format(p.price)}</div></td>
-      <td class="num ${cls(p.pnl)}">${signed(p.pnl)} ${CUR}<div class="name ${cls(p.pnl)}">${pct(p.pnl_pct, 1)}${p.leverage > 1 ? " auf Margin" : ""}</div></td>
-      <td class="num">${nf(2).format(p.stop)}${lev ? `<div class="name">${nf(2).format(p.liquidation)}</div>` : ""}</td>
-    </tr>`).join("")}
-  </table>`;
-  $("positions").querySelectorAll("tr.pick").forEach((tr) => tr.onclick = () => pcSelect(tr.dataset.sym, true));
+  const levTxt = (p) => (p.leverage > 1 ? " " + nf(1).format(p.leverage).replace(",0", "") + "x" : "");
+  const sorted = [...s.positions].sort((a, b) => b.pnl - a.pnl);
+  $("positions").innerHTML = `<div class="zpos-list">${sorted.map((p) => `
+    <div class="zpos pick" data-sym="${esc(p.symbol)}" title="Im Kurs-Chart anzeigen">
+      <div class="zrow">
+        <div class="zl"><div><b>${esc(p.name)}</b> <span class="name">${esc(p.symbol)}</span></div>
+          <div class="name"><span class="tag ${p.side}">${p.side === "short" ? "Short" : "Long"}${levTxt(p)}</span> seit ${dt(p.opened)}</div></div>
+        <div class="zr"><b class="${cls(p.pnl)}">${signed(p.pnl)} ${CUR}</b>
+          <div class="name ${cls(p.pnl)}">${pct(p.pnl_pct, 1)}${lev ? " auf Einsatz" : ""}</div></div>
+      </div>
+      <div class="zmeta">
+        <span>Einsatz <b>${money(p.margin, 0)}</b></span>${lev ? `<span>Volumen <b>${money(p.exposure, 0)}</b></span>` : ""}
+        <span>Einstand <b>${nf(2).format(p.avg_price)}</b></span><span>Kurs <b>${nf(2).format(p.price)}</b></span>
+        <span>Stop <b>${nf(2).format(p.stop)}</b></span>${lev ? `<span>${p.product ? "Knock-out" : "Liq."} <b class="down">${nf(2).format(p.liquidation)}</b></span>` : ""}
+      </div>
+      ${p.product ? `<div class="zprod">📄 <a href="https://app.traderepublic.com/instrument/${encodeURIComponent(p.product.isin)}" target="_blank" rel="noopener">${esc(p.product.name)}</a>
+        <span class="name">· ${esc(p.product.isin)} · Schwelle ${nf(2).format(p.product.barrier)} ${esc(p.product.currency || "")}</span></div>` : ""}
+    </div>`).join("")}</div>`;
+  $("positions").querySelectorAll(".pick").forEach((el) => el.onclick = (e) => { if (!e.target.closest("a")) pcSelect(el.dataset.sym, true); });
 }
 
 // ---------- Signale ----------
