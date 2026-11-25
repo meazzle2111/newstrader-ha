@@ -7,6 +7,9 @@ Regeln (Einstellungen in config.ZOCKER):
 - Verkauft wird, wenn ein Wert aus den besten 6 fällt, oder über Stop-Loss / Trailing-Stop (bei Scheinen 60 % des
   Abstands zur Knock-out-Schwelle, bei 5x also ~12 %; bei Aktien 25 %).
 - Nach einem Stop wird derselbe Wert ~1 Tag nicht wieder gekauft.
+- Nachrichten-Filter: Vor jedem Kauf prüft die KI die Nachrichtenlage. Ist sie klar negativ (z. B. Gewinnwarnung,
+  Klage, Herabstufung), wird der Wert übersprungen und der nächste aus der Rangliste rückt nach. Übersprungene Käufe
+  werden weiter beobachtet – so zeigt sich mit der Zeit, ob der Filter Geld spart oder kostet.
 """
 from __future__ import annotations
 
@@ -20,6 +23,9 @@ from .config import Config, STATE_DIR
 
 log = logging.getLogger(__name__)
 FILE = STATE_DIR / "momentum.json"
+NEWS_VETO = -0.30          # KI-Bewertung (−1…+1, mit Sicherheit gewichtet) ab hier: klar negativ -> nicht kaufen
+LEXICON_VETO = -0.50       # nur Wörterbuch (KI nicht erreichbar): erst bei sehr negativer Lage
+NEWS_WAIT_H = 3.0          # so lange auf die KI-Bewertung warten, danach notfalls das Wörterbuch
 
 
 def eligible(symbol: str) -> bool:
@@ -46,6 +52,9 @@ def load() -> dict:
     d.setdefault("ranking", [])
     d.setdefault("cooldown", {})
     d.setdefault("prev", [])
+    d.setdefault("vetoes", [])       # übersprungene Käufe (Nachrichten-Filter) – werden weiter beobachtet
+    d.setdefault("news_wait", {})    # Symbol -> seit wann auf die KI-Bewertung gewartet wird
+    d.setdefault("status", {})       # Symbol -> [Zustand, Text] der Kaufkandidaten im letzten Durchlauf
     return d
 
 
@@ -77,6 +86,33 @@ def update(cfg: Config, closes: dict[str, pd.Series], today=None) -> list[str]:
     return [r["symbol"] for r in rows]
 
 
+def news_check(snap, d: dict, now: datetime) -> tuple[str, str]:
+    """„ok“, „wait“ (Nachrichten/KI-Bewertung stehen noch aus) oder „veto“ (klar negative Nachrichtenlage)."""
+    n = snap.news
+    if not snap.news_loaded:
+        return "wait", "Nachrichten werden geladen"
+    if n.n_headlines == 0:
+        return "ok", "keine aktuellen Meldungen"
+    if n.analyst == "claude":                                   # von einer KI (Gemini/Claude) geprüft
+        return ("veto" if n.score <= NEWS_VETO else "ok"), n.summary
+    first = d["news_wait"].setdefault(snap.symbol, now.isoformat(timespec="seconds"))
+    if now - datetime.fromisoformat(first) < timedelta(hours=NEWS_WAIT_H):
+        return "wait", "wartet auf die KI-Bewertung der Nachrichten"
+    return ("veto" if n.score <= LEXICON_VETO else "ok"), f"(Wörterbuch, KI nicht erreichbar) {n.summary}"
+
+
+def _note_veto(d: dict, r: dict, snap, now: datetime, text: str) -> None:
+    sym = r["symbol"]
+    day_ago = (now - timedelta(hours=24)).isoformat()
+    if any(v["symbol"] == sym and v["time"] >= day_ago for v in d["vetoes"]):
+        return
+    d["vetoes"].append({"symbol": sym, "name": r.get("name", sym), "time": now.isoformat(timespec="seconds"),
+                        "price": snap.price, "price_now": snap.price, "news": round(snap.news.score, 3),
+                        "mom": r["mom"], "why": text[:200]})
+    d["vetoes"] = d["vetoes"][-50:]
+    log.info("Momentum: %s übersprungen – Nachrichtenlage klar negativ (%+.2f): %s", sym, snap.news.score, text[:160])
+
+
 def run(broker, cfg: Config, snaps: dict) -> None:
     """Ein Durchlauf des Zockers: Stops prüfen, aus der Rangliste Gefallene verkaufen, die Besten kaufen."""
     from .strategy import _real_product, check_risk
@@ -106,15 +142,34 @@ def run(broker, cfg: Config, snaps: dict) -> None:
             place = order.index(sym) + 1 if sym in order else None
             broker.close(sym, snap.price, f"Momentum: {f'nur noch Platz {place}' if place else 'Kursstärke nicht mehr positiv'}"
                                           f" – nicht mehr unter den besten {cfg.mom_keep_rank}")
-        # 2) Die Besten kaufen (freie Plätze, je ⅓ des Kontos)
+        # 2) Die Besten kaufen (freie Plätze, je ⅓ des Kontos). Wert mit klar schlechten Nachrichten -> der nächste rückt nach
         equity = broker.equity(prices)
         searches = [0]
-        for i, r in enumerate(ranking[:cfg.mom_positions]):
+        slots = cfg.mom_positions
+        status: dict[str, list] = {}
+        for i, r in enumerate(ranking[:cfg.mom_keep_rank]):
+            if slots <= 0 or len(broker.positions) >= cfg.mom_positions:
+                break
             sym = r["symbol"]
             snap = snaps.get(sym)
-            if len(broker.positions) >= cfg.mom_positions:
-                break
-            if sym in broker.positions or sym in d["cooldown"] or not snap or not snap.tradable:
+            if sym in broker.positions:
+                slots -= 1
+                continue
+            if sym in d["cooldown"]:
+                slots -= 1
+                status[sym] = ["pause", "Pause nach Stop"]
+                continue
+            if not snap or not snap.tradable:
+                slots -= 1
+                status[sym] = ["closed", "Börse gerade zu"]
+                continue
+            verdict, text = news_check(snap, d, now)
+            status[sym] = [verdict, text[:160]]
+            if verdict == "veto":
+                _note_veto(d, r, snap, now, text)
+                continue                    # kein Platz verbraucht: der nächste Wert rückt nach
+            slots -= 1
+            if verdict == "wait":
                 continue
             isin = (cfg.isins or {}).get(sym)
             if cfg.real_products and isin:
@@ -128,19 +183,54 @@ def run(broker, cfg: Config, snaps: dict) -> None:
                 continue
             via = (f"via {product['name']} ({product['isin']}), KO {product['barrier']:g} {product.get('currency', '')}"
                    if product else f"Aktie direkt (kein passender Schein mit Hebel um {cfg.product_target_leverage:g})")
-            broker.open(sym, "long", snap.price, margin, lev,
-                        f"Momentum Platz {i + 1}: {r['mom']:+.0%} in 6 Monaten · {lev:g}x {via}",
-                        product=product, entry={"strategy": "momentum", "mom": r["mom"], "rank": i + 1, "lev": lev})
+            n = snap.news
+            if broker.open(sym, "long", snap.price, margin, lev,
+                           f"Momentum Platz {i + 1}: {r['mom']:+.0%} in 6 Monaten · {lev:g}x {via} · Nachrichten {n.score:+.2f}",
+                           product=product, entry={"strategy": "momentum", "mom": r["mom"], "rank": i + 1, "lev": lev,
+                                                   "news": round(n.score, 3), "n_news": n.n_headlines, "analyst": n.analyst,
+                                                   "provider": n.provider, "news_summary": n.summary[:160]}):
+                d["news_wait"].pop(sym, None)
+        d["status"] = status
+        d["news_wait"] = {s: t for s, t in d["news_wait"].items() if status.get(s, [""])[0] == "wait"}
+    # übersprungene Käufe weiter beobachten: wie liefen sie seitdem?
+    for v in d["vetoes"]:
+        snap = snaps.get(v["symbol"])
+        if snap and snap.price:
+            v["price_now"] = snap.price
+            v["updated"] = now.isoformat(timespec="seconds")
     d["prev"] = list(broker.positions)
     _save(d)
+
+
+def _status(d: dict, sym: str, rank: int, held: set[str], cfg: Config, now: datetime) -> list | None:
+    if sym in held:
+        return None
+    day_ago = (now - timedelta(hours=24)).isoformat()
+    veto = next((v for v in reversed(d["vetoes"]) if v["symbol"] == sym and v["time"] >= day_ago), None)
+    st = d["status"].get(sym)
+    if st and st[0] != "ok":
+        return st
+    if veto:
+        return ["veto", veto["why"]]
+    if rank <= cfg.mom_positions and len(held) >= cfg.mom_positions:
+        return ["full", "alle Plätze belegt – gekauft wird, sobald ein Wert die besten " f"{cfg.mom_keep_rank} verlässt"]
+    return st
 
 
 def view(cfg: Config, held: set[str]) -> dict:
     """Für die Oberfläche: Rangliste und Regeln."""
     d = load()
+    now = datetime.now(timezone.utc)
+    vetoes = [{**v, "change": (v["price_now"] / v["price"] - 1) if v.get("price") else None,
+               "days": (now - datetime.fromisoformat(v["time"])).total_seconds() / 86400} for v in d["vetoes"]]
+    judged = [v for v in vetoes if v["days"] >= 5 and v["change"] is not None]   # erst nach ein paar Tagen aussagekräftig
     return {"time": d.get("time"), "n": d.get("n", 0),
-            "ranking": [{**r, "rank": i + 1, "held": r["symbol"] in held} for i, r in enumerate(d["ranking"][:10])],
+            "ranking": [{**r, "rank": i + 1, "held": r["symbol"] in held, "status": _status(d, r["symbol"], i + 1, held, cfg, now)}
+                        for i, r in enumerate(d["ranking"][:10])],
             "cooldown": sorted(d["cooldown"]),
+            "vetoes": vetoes[-6:][::-1],
+            "filter": {"n": len(judged), "avg": sum(v["change"] for v in judged) / len(judged) if judged else None,
+                       "threshold": NEWS_VETO},
             "rules": {"positions": cfg.mom_positions, "keep": cfg.mom_keep_rank, "stop": cfg.stop_loss_pct,
                       "stop_product": min(cfg.stop_loss_pct, cfg.product_stop_share / cfg.product_target_leverage),
                       "trailing": cfg.trailing_stop_pct, "lev": [cfg.product_min_leverage, cfg.product_target_leverage,

@@ -136,11 +136,13 @@ def collect(cfg: Config, analyst: NewsAnalyst, held: set[str] | None = None
     worst = sorted(valid, key=lambda b: b[2].score)[: cfg.news_top_n - n_long]   # Rest für Shorts im Zockerportfolio
     focus = set(held) | {b[0] for b in best + worst}
     zc = cfg.zocker()
-    if zc.zocker_strategy == "momentum":   # Zocker: Rangliste nach Kursstärke; die Besten brauchen Live-Kurse
+    mom_cands: list[str] = []
+    if zc.zocker_strategy == "momentum":   # Zocker: Rangliste nach Kursstärke; die Besten brauchen Live-Kurse + Nachrichten
         from . import momentum
         try:
             order = momentum.update(zc, {b[0]: b[1] for b in base if b[1] is not None})
             focus |= set(order[:zc.mom_keep_rank + 2])
+            mom_cands = [s for s in order[:zc.mom_keep_rank] if s not in held][:zc.mom_positions + 2]
         except Exception:  # noqa: BLE001
             log.exception("Momentum-Rangliste fehlgeschlagen")
     # Stufe 1: Live-Kurs + Nachrichten nur für den Fokus (deutlichste Signale + alles im Depot)
@@ -204,6 +206,8 @@ def collect(cfg: Config, analyst: NewsAnalyst, held: set[str] | None = None
         near = [s for s in near if open_now(s)]
         chosen = [s for s in held if s in snaps and open_now(s)] + near[:cfg.claude_top_n]
         chosen += [s for s in rapid if s in snaps and s not in chosen]   # rasante Bewegung: immer zu Claude
+        # Zocker-Kandidaten (Momentum): vor dem Kauf prüft die KI die Nachrichtenlage (Filter gegen klar schlechte News)
+        chosen += [s for s in mom_cands if s in snaps and s not in chosen and open_now(s) and snaps[s].news_loaded]
 
         def deep(sym):
             hl = _headline_cache.get(sym, (0, []))[1]

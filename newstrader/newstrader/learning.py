@@ -136,6 +136,19 @@ class Learner:
                 wins = sum(1 for x in closed if x["ret"] > 0)
                 lessons.append(f"{len(closed)} Momentum-Trades abgeschlossen: {wins} im Plus, im Schnitt {avg:+.0%} auf den Einsatz. "
                                "Momentum lebt von wenigen großen Gewinnern – viele kleine Verluste sind normal.")
+                # Nachrichten-Filter auswerten: liefen Käufe bei eher schlechter Nachrichtenlage schlechter?
+                with_news = [x for x in closed if (x.get("entry") or {}).get("n_news")]
+                neg = [x["ret"] for x in with_news if x["entry"].get("news", 0) < 0]
+                pos = [x["ret"] for x in with_news if x["entry"].get("news", 0) >= 0]
+                if len(neg) >= 3 and len(pos) >= 3:
+                    a_n, a_p = sum(neg) / len(neg), sum(pos) / len(pos)
+                    lessons.append(f"Käufe bei leicht negativen Nachrichten: Ø {a_n:+.0%} ({len(neg)}), bei neutralen/positiven: "
+                                   f"Ø {a_p:+.0%} ({len(pos)})" + (" – die Nachrichten helfen." if a_p > a_n + 0.05 else
+                                   " – bisher kein klarer Unterschied." if abs(a_p - a_n) <= 0.05 else
+                                   " – schlechte Nachrichten haben eher nicht geschadet."))
+                else:
+                    lessons.append("Nachrichten-Filter: Ob die Nachrichtenlage beim Kauf etwas aussagt, wird ausgewertet, "
+                                   "sobald je mindestens 3 Trades mit eher guter und eher schlechter Lage abgeschlossen sind.")
         elif s["n"] < MIN_TRADES:
             lessons.append(f"Sammelt noch Erfahrung – ab {MIN_TRADES} abgeschlossenen Trades passt er sich an ({s['n']} bisher).")
         else:
